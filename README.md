@@ -26,6 +26,8 @@ Updates: the overlay checks GitHub when it starts and shows a tray notification 
 Install it from Settings > General > Updates > **Update now**: the exe is replaced and restarted, your settings,
 profiles and records are kept.
 
+**[Guida in italiano: come funziona ogni widget e come personalizzarlo](docs/GUIDA.md)**
+
 Publishing a new version (maintainer): `powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version 1.0.1 -Notes "What changed"`.
 
 ## Build
