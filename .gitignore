@@ -1,0 +1,9 @@
+# Build output
+build/
+
+# Everything the overlay writes next to the exe (personal: settings, layouts, laps, logs).
+bin/
+!bin/.gitkeep
+
+# Local backups
+profiles-backup-*/
