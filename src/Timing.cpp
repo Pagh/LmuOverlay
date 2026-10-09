@@ -23,6 +23,7 @@ const wchar_t* DeltaRefLabel(DeltaRef r) {
     case DeltaRef::SessionBest: return L"SESSION";
     case DeltaRef::AllTime: return L"ALL-TIME";
     case DeltaRef::Lobby: return L"LOBBY";
+    case DeltaRef::LastLap: return L"LAST LAP";
     default: return L"";
   }
 }
@@ -56,7 +57,8 @@ void Timing::Reset() {
   preSum_ = postSum_ = 0;
   preCount_ = postCount_ = 0;
   paceBefore_ = paceSince_ = 0;
-  sessionTrace_ = lobbyTrace_ = LapTrace{};
+  sessionTrace_ = lobbyTrace_ = lastTrace_ = LapTrace{};
+  recentN_ = recentHead_ = 0;
   lobbyRef_ = SectorSet{};
   lobbyRefHolder_.clear();
   lobbyRefKey_ = -100;
@@ -73,12 +75,24 @@ double Timing::TimeAlong(double a, double b) const {
   return b >= a ? tb - ta : (tr->lap - ta) + tb;
 }
 
+// Standard deviation of your last valid laps (at least 3 of the last 5), 0 = not enough laps.
+double Timing::Consistency(int* laps) const {
+  if (laps) *laps = recentN_;
+  if (recentN_ < 3) return 0;
+  double sum = 0, sq = 0;
+  for (int i = 0; i < recentN_; ++i) sum += recent_[i];
+  const double mean = sum / recentN_;
+  for (int i = 0; i < recentN_; ++i) sq += (recent_[i] - mean) * (recent_[i] - mean);
+  return std::sqrt(sq / recentN_);
+}
+
 double Timing::ReferenceLap(DeltaRef ref) const {
   switch (ref) {
     case DeltaRef::LmuBest: return playerBest_ > 0 ? playerBest_ : sessionTrace_.lap;
     case DeltaRef::SessionBest: return sessionTrace_.lap;
     case DeltaRef::AllTime: return allTimeTrace_.lap;
     case DeltaRef::Lobby: return lobbyRef_.lap;
+    case DeltaRef::LastLap: return lastTrace_.lap;
     default: return 0;
   }
 }
@@ -137,6 +151,7 @@ bool Timing::RawDelta(DeltaRef ref, double& delta) const {
       delta = curT_ - WarpAt(*shape, lobbyRef_, curD_);
       return true;
     }
+    case DeltaRef::LastLap: return TraceDelta(lastTrace_, delta);
     default: return false;
   }
 }
@@ -161,6 +176,7 @@ void Timing::PairTrace(Vehicle& vt, const VehicleScoringInfoV01& v, bool isPlaye
     LapTrace tr = std::move(vt.trace);
     tr.lap = vt.pendingLap;
     if (vt.pendingValid) {
+      if (isPlayer) lastTrace_ = tr;
       if (isPlayer && (sessionTrace_.lap <= 0 || tr.lap <= sessionTrace_.lap)) sessionTrace_ = tr;
       // All-time reference: your fastest recorded trace (records saved before traces existed
       // may hold a faster lap time; the delta widget shows the reference lap's time).
@@ -260,8 +276,10 @@ void Timing::Update(const Snapshot& s, int playerIdx) {
 
   const std::string track = FixedString(s.scoring.mTrackName, sizeof(s.scoring.mTrackName));
   std::string car = t ? FixedString(t->mVehicleModel, sizeof(t->mVehicleModel)) : std::string();
-  if (car.empty() && playerIdx >= 0) car = FixedString(s.vehicles[playerIdx].mVehicleClass, 32);
-  if (!track.empty() && !car.empty() && (track != track_ || car != car_)) LoadRecords(track, car);
+  const std::string cls = playerIdx >= 0 ? FixedString(s.vehicles[playerIdx].mVehicleClass, 32) : std::string();
+  if (car.empty()) car = cls;
+  if (!track.empty() && !car.empty() && (track != track_ || car != car_ || (!cls.empty() && cls != class_)))
+    LoadRecords(track, car, cls);
 
   // Track outline and sector boundaries from every car on track.
   if (!track.empty() && L > 100 && (track != mapTrack_ || std::fabs(map_.Length() - L) > 1.0)) LoadMap(track, L);
@@ -367,6 +385,11 @@ void Timing::OnPlayerLap(const SectorSet& lap, bool valid, bool damaged) {
   playerLastValid_ = valid;
   if (!valid) { lapHadDamageChange_ = false; return; }
   playerSession_.TakeBest(lap);
+  if (lap.lap > 0 && lap.lap < playerSession_.lap * 1.07) { // not pit / traffic / incident laps
+    recent_[recentHead_] = lap.lap;
+    recentHead_ = (recentHead_ + 1) % kRecent;
+    recentN_ = std::min(recentN_ + 1, kRecent);
+  }
 
   SectorSet merged = allTime_;
   merged.TakeBest(lap);
@@ -391,24 +414,13 @@ void Timing::OnPlayerLap(const SectorSet& lap, bool valid, bool damaged) {
   lapHadDamageChange_ = false;
 }
 
-void Timing::LoadRecords(const std::string& track, const std::string& car) {
-  track_ = track;
-  car_ = car;
-  allTime_ = SectorSet{};
-  allTimeTrace_ = LapTrace{};
-  fuelPerLap_ = energyPerLap_ = 0;
-  if (recordsDir_.empty()) return;
-  IniDoc doc;
-  if (!doc.Load(recordsDir_ + L"\\" + SafeFileName(track + " - " + car) + L".ini")) return;
-  allTime_.s[0] = doc.GetFloat("best", "s1", 0);
-  allTime_.s[1] = doc.GetFloat("best", "s2", 0);
-  allTime_.s[2] = doc.GetFloat("best", "s3", 0);
-  allTime_.lap = doc.GetFloat("best", "lap", 0);
-  fuelPerLap_ = doc.GetFloat("usage", "fuel_per_lap", 0);
-  energyPerLap_ = doc.GetFloat("usage", "energy_per_lap", 0);
-
-  // Trace of the all-time best lap, for the live delta (elapsed ms every 5 m).
-  allTimeTrace_ = LapTrace{};
+// [best] sectors / lap and the [trace] of that lap (elapsed ms every 5 m, for the live delta).
+static void ReadBest(const IniDoc& doc, SectorSet& best, LapTrace& trace) {
+  best.s[0] = doc.GetFloat("best", "s1", 0);
+  best.s[1] = doc.GetFloat("best", "s2", 0);
+  best.s[2] = doc.GetFloat("best", "s3", 0);
+  best.lap = doc.GetFloat("best", "lap", 0);
+  trace = LapTrace{};
   const std::string data = doc.Get("trace", "ms", "");
   const double length = doc.GetFloat("trace", "length", 0);
   if (!data.empty() && length > 0 && doc.GetFloat("trace", "bin", 0) == kTraceBin) {
@@ -423,17 +435,63 @@ void Timing::LoadRecords(const std::string& track, const std::string& car) {
     }
     tr.length = length;
     tr.lap = doc.GetFloat("trace", "lap", 0);
-    if (tr.t.size() == static_cast<size_t>(length / kTraceBin) + 1) allTimeTrace_ = std::move(tr);
+    if (tr.t.size() == static_cast<size_t>(length / kTraceBin) + 1) trace = std::move(tr);
   }
+}
+
+std::wstring Timing::CarFile() const { return recordsDir_ + L"\\" + SafeFileName(track_ + " - " + car_) + L".ini"; }
+
+// The all-time best is shared by every car of a class; without a class it stays with the car.
+std::wstring Timing::BestFile() const {
+  return class_.empty() ? CarFile() : recordsDir_ + L"\\" + SafeFileName(track_ + " - class " + class_) + L".ini";
+}
+
+void Timing::LoadRecords(const std::string& track, const std::string& car, const std::string& cls) {
+  track_ = track;
+  car_ = car;
+  class_ = cls;
+  allTime_ = SectorSet{};
+  allTimeTrace_ = LapTrace{};
+  fuelPerLap_ = energyPerLap_ = 0;
+  if (recordsDir_.empty()) return;
+
+  // Per car: fuel / energy use (and, from before bests were per class, that car's own best).
+  IniDoc carDoc;
+  SectorSet carBest;
+  LapTrace carTrace;
+  if (carDoc.Load(CarFile())) {
+    fuelPerLap_ = carDoc.GetFloat("usage", "fuel_per_lap", 0);
+    energyPerLap_ = carDoc.GetFloat("usage", "energy_per_lap", 0);
+    ReadBest(carDoc, carBest, carTrace);
+  }
+  if (class_.empty()) {
+    allTime_ = carBest;
+    allTimeTrace_ = std::move(carTrace);
+    return;
+  }
+  IniDoc doc;
+  if (doc.Load(BestFile())) ReadBest(doc, allTime_, allTimeTrace_);
+  // Fold in a car file that predates the class file, once.
+  const SectorSet before = allTime_;
+  allTime_.TakeBest(carBest);
+  bool changed = memcmp(&before, &allTime_, sizeof(before)) != 0;
+  if (carTrace.Valid() && (!allTimeTrace_.Valid() || carTrace.lap < allTimeTrace_.lap)) {
+    allTimeTrace_ = std::move(carTrace);
+    changed = true;
+  }
+  if (changed) SaveRecords();
 }
 
 void Timing::SaveRecords() const {
   if (recordsDir_.empty() || track_.empty() || car_.empty()) return;
   CreateDirectoryW(recordsDir_.c_str(), nullptr);
   IniDoc doc;
-  doc.header = "All-time personal bests (valid laps only). Delete this file to reset.";
+  doc.header = class_.empty() ? "All-time personal bests (valid laps only). Delete this file to reset."
+                              : "All-time personal bests for every car of the class (valid laps only). "
+                                "Delete this file to reset.";
   doc.Set("info", "track", track_);
-  doc.Set("info", "car", car_);
+  if (class_.empty()) doc.Set("info", "car", car_);
+  else doc.Set("info", "class", class_);
   char buf[32];
   auto put = [&](const char* key, double v) {
     snprintf(buf, sizeof(buf), "%.3f", v);
@@ -443,12 +501,7 @@ void Timing::SaveRecords() const {
   put("s2", allTime_.s[1]);
   put("s3", allTime_.s[2]);
   put("lap", allTime_.lap);
-  if (fuelPerLap_ > 0 || energyPerLap_ > 0) {
-    snprintf(buf, sizeof(buf), "%.4f", fuelPerLap_);
-    doc.Set("usage", "fuel_per_lap", buf);
-    snprintf(buf, sizeof(buf), "%.5f", energyPerLap_);
-    doc.Set("usage", "energy_per_lap", buf);
-  }
+  if (class_.empty()) PutUsage(doc);
   if (allTimeTrace_.Valid()) {
     std::string data;
     data.reserve(allTimeTrace_.t.size() * 7);
@@ -465,7 +518,16 @@ void Timing::SaveRecords() const {
     doc.Set("trace", "lap", buf);
     doc.Set("trace", "ms", std::move(data));
   }
-  doc.Save(recordsDir_ + L"\\" + SafeFileName(track_ + " - " + car_) + L".ini");
+  doc.Save(BestFile());
+}
+
+void Timing::PutUsage(IniDoc& doc) const {
+  if (fuelPerLap_ <= 0 && energyPerLap_ <= 0) return;
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%.4f", fuelPerLap_);
+  doc.Set("usage", "fuel_per_lap", buf);
+  snprintf(buf, sizeof(buf), "%.5f", energyPerLap_);
+  doc.Set("usage", "energy_per_lap", buf);
 }
 
 void Timing::RecordConsumption(double fuelPerLap, double energyPerLap) {
@@ -473,7 +535,17 @@ void Timing::RecordConsumption(double fuelPerLap, double energyPerLap) {
   if (!changed(fuelPerLap_, fuelPerLap) && !changed(energyPerLap_, energyPerLap)) return;
   if (fuelPerLap > 0) fuelPerLap_ = fuelPerLap;
   if (energyPerLap > 0) energyPerLap_ = energyPerLap;
-  SaveRecords();
+  if (class_.empty()) { SaveRecords(); return; }
+  // Fuel and energy use stay per car: update the car file, keeping whatever else it holds.
+  if (recordsDir_.empty() || track_.empty() || car_.empty()) return;
+  CreateDirectoryW(recordsDir_.c_str(), nullptr);
+  IniDoc doc;
+  doc.Load(CarFile());
+  doc.header = "Fuel / virtual energy use per lap for this car (all-time bests are in the class file).";
+  doc.Set("info", "track", track_);
+  doc.Set("info", "car", car_);
+  PutUsage(doc);
+  doc.Save(CarFile());
 }
 
 void Timing::LoadMap(const std::string& track, double length) {

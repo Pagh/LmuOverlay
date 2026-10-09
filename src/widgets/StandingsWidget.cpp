@@ -11,7 +11,7 @@ constexpr int kMaxRows = 20;
 constexpr float kRowH = 20.f, kPad = 6.f, kHeaderH = 18.f;
 constexpr float kLine1H = 22.f, kLine2H = 16.f, kCardH = 50.f, kNoteH = 16.f;
 constexpr float kSessionMaxH = kLine1H + kLine2H + 4 + kCardH + 4 + kNoteH + 6;
-constexpr float kPosW = 28.f, kNumW = 40.f, kBrandW = 40.f, kNameW = 150.f, kTagW = 32.f, kLapW = 72.f, kFuelW = 44.f, kGapW = 70.f;
+constexpr float kPosW = 28.f, kNumW = 40.f, kBrandW = 40.f, kNameW = 150.f, kTagW = 32.f, kLapW = 72.f, kGapW = 70.f;
 
 struct Row {
   int classPlace = 0;
@@ -23,7 +23,7 @@ struct Row {
   int gapMs = 0;            // -1 = no time to compare (practice / qualifying without a lap)
   int lapsDown = 0;
   int pitstops = 0;
-  int fuel = -1;            // % fuel / energy left, as LMU reports it for every car
+  CarState car;             // fuel / energy left, tyres
   bool pit = false;
   bool player = false;
   bool gapBefore = false;   // draw a separator above (rows skipped)
@@ -72,7 +72,8 @@ const OptionDef kOptions[] = {
   OptBool("show_brand", "Column: car make", true),
   OptBool("show_best_lap", "Column: best lap", true),
   OptBool("show_last_lap", "Column: last lap", true),
-  OptBool("show_fuel", "Column: fuel / energy %", true),
+  OptBool("show_fuel", "Column: fuel / virtual energy %", true, "Fuel left, then virtual energy (blue) for cars that have it"),
+  OptBool("show_tyres", "Column: tyres", true, "Compound (front / rear if different) and tread left"),
   OptBool("show_pitstops", "Show pit stop count", true),
   OptChoice("gap_to", "Gap to", "leader|car ahead", 0,
             "Race: time behind on track. Practice / qualifying: difference between best laps."),
@@ -98,6 +99,7 @@ public:
         best_(o.Bool("show_best_lap")),
         last_(o.Bool("show_last_lap")),
         fuel_(o.Bool("show_fuel")),
+        tyres_(o.Bool("show_tyres")),
         showStops_(o.Bool("show_pitstops")),
         toAhead_(o.Choice("gap_to") == 1),
         gapDecimals_(o.Int("gap_decimals")),
@@ -109,7 +111,7 @@ public:
 
   float Width() const override {
     return kPad * 2 + kPosW + (number_ ? kNumW : 0) + (brand_ ? kBrandW : 0) + kNameW + kTagW + (best_ ? kLapW : 0) + (last_ ? kLapW : 0) +
-           (fuel_ ? kFuelW : 0) + kGapW;
+           (fuel_ ? kCarFuelW : 0) + (tyres_ ? kCarTyreW : 0) + kGapW;
   }
   float Height() const override { return kPad * 2 + (session_ ? kSessionMaxH : 0) + kHeaderH + kRowH * maxRows_; }
 
@@ -146,7 +148,8 @@ public:
     x += kNameW + kTagW;
     if (best_) { p.Text(x, y, kLapW, kHeaderH, L"BEST", Font::Small, Col::Dim, Align::Right); x += kLapW; }
     if (last_) { p.Text(x, y, kLapW, kHeaderH, L"LAST", Font::Small, Col::Dim, Align::Right); x += kLapW; }
-    if (fuel_) { p.Text(x, y, kFuelW, kHeaderH, L"FUEL", Font::Small, Col::Dim, Align::Right); x += kFuelW; }
+    if (fuel_) { p.Text(x, y, kCarFuelW - 2, kHeaderH, L"FUEL · VE", Font::Small, Col::Dim, Align::Right); x += kCarFuelW; }
+    if (tyres_) { p.Text(x, y, kCarTyreW - 2, kHeaderH, L"TYRES", Font::Small, Col::Dim, Align::Right); x += kCarTyreW; }
     p.Text(x, y, kGapW - 4, kHeaderH, toAhead_ ? L"INT" : L"GAP", Font::Small, Col::Dim, Align::Right);
     y += kHeaderH;
 
@@ -189,13 +192,8 @@ public:
         p.Text(x, y, kLapW, kRowH, buf, Font::Text, r.lastMs ? timeColor(r.lastTint) : Col::Dim, Align::Right);
         x += kLapW;
       }
-      if (fuel_) {
-        if (r.fuel >= 0) {
-          const D2D1_COLOR_F c = r.fuel < 10 ? Col::Bad : r.fuel < 25 ? Col::Warn : Col::Dim;
-          p.Textf(x, y, kFuelW, kRowH, Font::Small, c, Align::Right, L"%d%%", r.fuel);
-        }
-        x += kFuelW;
-      }
+      if (fuel_) { DrawCarFuel(p, x, y, kCarFuelW, kRowH, r.car, r.pit ? 0.5f : 1.f); x += kCarFuelW; }
+      if (tyres_) { DrawCarTyres(p, x, y, kCarTyreW, kRowH, r.car, r.pit ? 0.5f : 1.f); x += kCarTyreW; }
       if (r.classPlace == 1 && !toAhead_) p.Text(x, y, kGapW - 4, kRowH, L"LEADER", Font::Small, Col::Dim, Align::Right);
       else if (r.classPlace == 1) p.Text(x, y, kGapW - 4, kRowH, L"—", Font::Small, Col::Dim, Align::Right);
       else if (r.gapMs < 0) p.Text(x, y, kGapW - 4, kRowH, L"—", Font::Small, Col::Dim, Align::Right);
@@ -406,7 +404,7 @@ private:
         r.gapMs = -1;
       }
       r.pitstops = o.mNumPitstops;
-      r.fuel = static_cast<int>(std::lround(o.mFuelFraction * 100.0 / 255.0));
+      if (fuel_ || tyres_) r.car = CarStateFor(s, o);
       r.pit = o.mInPits;
       r.player = idx[pick[c]] == m.playerIdx;
       r.gapBefore = c > 0 && pick[c] != pick[c - 1] + 1;
@@ -414,7 +412,7 @@ private:
   }
 
   int maxRows_, topRows_;
-  bool session_, conditions_, number_, brand_, best_, last_, fuel_, showStops_, toAhead_;
+  bool session_, conditions_, number_, brand_, best_, last_, fuel_, tyres_, showStops_, toAhead_;
   int gapDecimals_, timeDecimals_;
   D2D1_COLOR_F playerRow_, text_, classBest_, personalBest_;
   View view_;

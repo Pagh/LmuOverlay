@@ -558,6 +558,35 @@ void SettingsWindow::DrawGeneralTab() {
   bool changed = false;
 
   ImGui::BeginChild("general", ImVec2(0, 0), ImGuiChildFlags_Borders);
+  ImGui::SeparatorText("Race plan (practice and qualifying)");
+  changed |= ImGui::Checkbox("Plan the strategy for this race", &gs.planEnabled);
+  HelpMarker("Practice and qualifying don't know which race comes next. Set its length here and the\n"
+             "Strategy widget shows the plan from your pace and fuel / energy use in this session:\n"
+             "laps, what to start with, how many stops, when and how much to add.\n"
+             "In a race session the real race is used instead.");
+  ImGui::BeginDisabled(!gs.planEnabled);
+  {
+    int kind = gs.planByLaps ? 1 : 0;
+    changed |= ImGui::RadioButton("Time", &kind, 0);
+    ImGui::SameLine();
+    changed |= ImGui::RadioButton("Laps", &kind, 1);
+    gs.planByLaps = kind == 1;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120 * s);
+    if (gs.planByLaps) {
+      if (ImGui::InputInt("laps##plan", &gs.planLaps, 1, 5)) { gs.planLaps = std::clamp(gs.planLaps, 1, 999); changed = true; }
+    } else {
+      if (ImGui::InputInt("minutes##plan", &gs.planMinutes, 5, 30)) { gs.planMinutes = std::clamp(gs.planMinutes, 5, 1440); changed = true; }
+    }
+    const RacePlan& plan = app.LivePlan();
+    if (plan.valid && plan.ready)
+      ImGui::TextDisabled("Now: about %.0f laps, %s", plan.totalLaps,
+                          plan.stops == 0 ? "no pit stop" : plan.stops == 1 ? "1 pit stop" : (std::to_string(plan.stops) + " pit stops").c_str());
+    else if (plan.valid)
+      ImGui::TextDisabled("Drive a clean lap to measure your pace and fuel use.");
+  }
+  ImGui::EndDisabled();
+
   ImGui::SeparatorText("Display");
   {
     const std::vector<MonitorInfo> mons = EnumMonitors();

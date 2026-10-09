@@ -1,7 +1,8 @@
 // Damage: a small car silhouette with the hit zones and wheels, aero / suspension damage,
 // the repair time and the lap time you're losing because of it. Only shown once you're
-// damaged (option). Body dents and wheel state come from shared memory; aero / suspension
-// damage and the repair time from LMU's REST API (polled rarely, see App).
+// damaged (option), and for a few seconds after any contact, so a touch that left no damage
+// is confirmed too. Body dents, wheel state and impacts come from shared memory; aero /
+// suspension damage and the repair time from LMU's REST API (polled rarely, see App).
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <climits>
@@ -33,12 +34,19 @@ struct View {
   int repairS = 0;           // repair time, s
   int lossMs = INT_MIN;      // lap time lost per lap
   bool damaged = false;
+  bool contact = false;      // a contact in the last few seconds
+  int impact = 0;            // its strength (LMU's impact magnitude)
+  int contacts = 0;          // contacts this session
   Status status = Status::Ok;
   bool operator==(const View&) const = default;
 };
 
 const OptionDef kOptions[] = {
   OptBool("show_when_clean", "Show when there's no damage", false, "Off: the widget only appears once you have damage"),
+  OptBool("show_contact", "Show after a contact", true,
+          "Also appears for a few seconds after any contact (car or wall), saying whether it left damage"),
+  OptInt("contact_seconds", "Contact shown for (s)", 6, 2, 30),
+  OptInt("min_impact", "Ignore contacts weaker than", 20, 0, 2000, "LMU's impact magnitude: kerb bumps are small"),
   OptColor("light", "Light damage", 0xFFB52EFF),
   OptColor("heavy", "Heavy damage", 0xFF4D4DFF),
   OptColor("ok", "No damage", 0x3B4452FF),
@@ -49,6 +57,9 @@ public:
   DamageWidget(const WidgetType& t, const OptionSet& o)
       : Widget(t, o),
         showClean_(o.Bool("show_when_clean")),
+        showContact_(o.Bool("show_contact")),
+        contactS_(o.Int("contact_seconds")),
+        minImpact_(o.Int("min_impact")),
         light_(o.Color("light")),
         heavy_(o.Color("heavy")),
         ok_(o.Color("ok")) {}
@@ -58,14 +69,17 @@ public:
 
   bool Prepare(const Model& m) override {
     View v;
-    if (m.onTrack && m.telem) Build(m, v);
+    if (m.onTrack && m.telem) {
+      TrackContacts(*m.telem);
+      Build(m, v);
+    }
     if (v == view_) return false;
     view_ = v;
     return true;
   }
 
   void Draw(Painter& p) override {
-    if (!view_.valid || (!view_.damaged && !showClean_)) {
+    if (!view_.valid || (!view_.damaged && !view_.contact && !showClean_)) {
       if (p.EditMode()) DrawPlaceholder(p, kW, kH, L"DAMAGE (shown after a hit)");
       return;
     }
@@ -85,10 +99,12 @@ public:
       default:
         if (worst >= 0) { swprintf_s(title, L"%ls DAMAGE", kZoneName[worst]); tc = Severity(v.zone[worst]); }
         else if (v.damaged) { wcscpy_s(title, v.aero > 0 ? L"AERO DAMAGE" : L"DAMAGED"); tc = light_; }
+        else if (v.contact) { wcscpy_s(title, L"CONTACT · NO DAMAGE"); tc = Col::Good; }
         else wcscpy_s(title, L"NO DAMAGE");
     }
     p.Text(x, 6, w, 18, title, Font::TextBold, tc);
     if (v.repairS > 0) p.Textf(x, 6, w, 18, Font::Small, Col::Dim, Align::Right, L"repair  %d s", v.repairS);
+    else if (v.contact) p.Textf(x, 6, w, 18, Font::Small, Col::Warn, Align::Right, L"hit %d", v.impact);
 
     static const wchar_t* const kCorner[] = {L"Susp FL", L"Susp FR", L"Susp RL", L"Susp RR"};
     if (v.rest) {
@@ -99,7 +115,9 @@ public:
     } else {
       p.Text(x, 26, w, 34, L"aero / suspension: enable the\nLMU REST API in Settings > General", Font::Small, Col::Dim);
     }
-    p.Text(x, 64, w, 18, L"Lap time lost", Font::Small, Col::Dim);
+    if (v.contacts > 0) p.Textf(x, 64, w, 18, Font::Small, Col::Dim, Align::Left, L"Lap time lost  ·  %d contact%ls",
+                                v.contacts, v.contacts == 1 ? L"" : L"s");
+    else p.Text(x, 64, w, 18, L"Lap time lost", Font::Small, Col::Dim);
     if (v.lossMs != INT_MIN) {
       const D2D1_COLOR_F c = v.lossMs > 300 ? heavy_ : v.lossMs > 50 ? light_ : Col::Text;
       p.Textf(x, 64, w, 18, Font::TextBold, c, Align::Right, L"%+.2f s / lap", v.lossMs / 1000.0);
@@ -172,9 +190,30 @@ private:
     p.DrawGeometry(body_.Get(), Col::Rgb(0xC8CED8, 0.55f), 1.2f);
   }
 
+  // Counts contacts this session and remembers the last one (LMU only reports the latest impact).
+  void TrackContacts(const TelemInfoV01& t) {
+    const double et = t.mElapsedTime;
+    if (et < lastET_ - 1.0) { contacts_ = 0; seenImpactET_ = -1; } // new session / restart
+    lastET_ = et;
+    if (seenImpactET_ < 0) { seenImpactET_ = t.mLastImpactET; return; } // not one from before we looked
+    if (t.mLastImpactET > seenImpactET_ + 0.05) {
+      seenImpactET_ = t.mLastImpactET;
+      if (t.mLastImpactMagnitude >= minImpact_) {
+        ++contacts_;
+        contactET_ = t.mLastImpactET;
+        impact_ = static_cast<int>(std::lround(t.mLastImpactMagnitude));
+      }
+    }
+  }
+
   void Build(const Model& m, View& v) const {
     const TelemInfoV01& t = *m.telem;
     v.valid = true;
+    v.contacts = contacts_;
+    if (showContact_ && contactET_ > 0 && t.mElapsedTime - contactET_ < contactS_) {
+      v.contact = true;
+      v.impact = impact_;
+    }
     for (int z = 0; z < 8; ++z) v.zone[z] = std::min<uint8_t>(t.mDentSeverity[kZoneIndex[z]], 2);
     for (int i = 0; i < 4; ++i) {
       v.flat[i] = t.mWheel[i].mFlat;
@@ -201,8 +240,11 @@ private:
       v.lossMs = static_cast<int>(std::lround((m.timing->PaceSinceDamage() - m.timing->PaceBeforeDamage()) * 1000.0));
   }
 
-  bool showClean_;
+  bool showClean_, showContact_;
+  int contactS_, minImpact_;
   D2D1_COLOR_F light_, heavy_, ok_;
+  double lastET_ = -1, seenImpactET_ = -1, contactET_ = -1;
+  int contacts_ = 0, impact_ = 0;
   ComPtr<ID2D1PathGeometry> body_;
   ID2D1Factory* factory_ = nullptr;
   View view_;
@@ -211,5 +253,5 @@ private:
 } // namespace
 
 const WidgetType kDamageWidget{
-  "damage", "Damage", "Body zones, aero and suspension damage, repair time, and the lap time you're losing.",
+  "damage", "Damage", "Body zones, aero and suspension damage, repair time, the lap time you're losing, and contacts.",
   true, 1544, 750, 250, kOptions, CreateWidget<DamageWidget>};

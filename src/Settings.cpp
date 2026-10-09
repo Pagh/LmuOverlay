@@ -46,6 +46,10 @@ void GeneralSettings::Load(const IniDoc& d) {
   for (int i = 0; i < kWheelActions; ++i) wheelButtons[i] = d.Get("wheel_buttons", kWheelKeys[i], "");
   updateRepo = d.Get("update", "repo", "");
   updateCheckAtStart = d.GetBool("update", "check_at_start", def.updateCheckAtStart);
+  planEnabled = d.GetBool("race_plan", "enabled", def.planEnabled);
+  planByLaps = d.Get("race_plan", "length", "time") == "laps";
+  planMinutes = std::clamp(d.GetInt("race_plan", "minutes", def.planMinutes), 5, 1440);
+  planLaps = std::clamp(d.GetInt("race_plan", "laps", def.planLaps), 1, 999);
 }
 
 void GeneralSettings::Save(IniDoc& d) const {
@@ -71,6 +75,10 @@ void GeneralSettings::Save(IniDoc& d) const {
   for (int i = 0; i < kWheelActions; ++i) d.Set("wheel_buttons", kWheelKeys[i], wheelButtons[i]);
   d.Set("update", "repo", updateRepo);
   d.SetBool("update", "check_at_start", updateCheckAtStart);
+  d.SetBool("race_plan", "enabled", planEnabled);
+  d.Set("race_plan", "length", planByLaps ? "laps" : "time");
+  d.SetInt("race_plan", "minutes", planMinutes);
+  d.SetInt("race_plan", "laps", planLaps);
 }
 
 std::vector<MonitorInfo> EnumMonitors() {

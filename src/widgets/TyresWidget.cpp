@@ -1,5 +1,6 @@
-// Tyres & brakes: surface temperature (with an inner / centre / outer strip), pressure,
-// tread left and brake temperature per corner, plus an optional "ready to push" badge.
+// Tyres & brakes: tyre temperature (inner layer, surface or carcass, with a left / centre / right
+// strip) coloured against the compound's optimal window, pressure, tread left and brake temperature
+// per corner, plus an optional "ready to push" badge.
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <cmath>
@@ -11,7 +12,8 @@ constexpr float kW = kPad * 2 + kBoxW * 2 + kGap;
 
 struct Wheel {
   int strip[3]{};     // °C left/centre/right
-  int temp = 0;       // average surface °C
+  int temp = 0;       // average °C of the chosen layer
+  int cold = 0, hot = 0; // window for this tyre (°C)
   int kpa10 = 0;      // 0.1 kPa
   int wear = 0;       // % tread remaining
   int brake = 0;      // °C
@@ -29,8 +31,17 @@ struct View {
 };
 
 const OptionDef kOptions[] = {
-  OptInt("cold_c", "Tyre cold below (°C)", 70, 0, 200),
-  OptInt("hot_c", "Tyre hot above (°C)", 105, 0, 200),
+  OptChoice("temp_source", "Temperature shown", "Inner layer|Surface|Carcass", 0,
+            "Inner layer: rubber just above the carcass, steady (what LMU's own display follows). "
+            "Surface: tread skin, jumps up and down within a corner."),
+  OptBool("use_optimal", "Window from the tyre's optimal temperature", true,
+          "LMU reports each compound's optimal temperature: the window is optimal - below .. optimal + above. "
+          "Falls back to the fixed limits when the game doesn't report it."),
+  // LMP3 at Spa (2026-10-08): inner layer settles ~80 °C in the race against an optimal of 93 / 98.
+  OptInt("below_c", "Cold when below optimal by (°C)", 20, 0, 100),
+  OptInt("above_c", "Hot when above optimal by (°C)", 15, 0, 100),
+  OptInt("cold_c", "Fixed: tyre cold below (°C)", 70, 0, 200),
+  OptInt("hot_c", "Fixed: tyre hot above (°C)", 105, 0, 200),
   OptChoice("pressure_unit", "Pressure unit", "kPa|psi|bar", 0),
   OptBool("show_brakes", "Show brake temperature", true),
   OptInt("brake_hot_c", "Brake hot above (°C)", 800, 100, 1500),
@@ -44,6 +55,10 @@ class TyresWidget final : public Widget {
 public:
   TyresWidget(const WidgetType& t, const OptionSet& o)
       : Widget(t, o),
+        source_(o.Choice("temp_source")),
+        useOptimal_(o.Bool("use_optimal")),
+        below_(o.Int("below_c")),
+        above_(o.Int("above_c")),
         cold_(o.Int("cold_c")),
         hot_(o.Int("hot_c")),
         unit_(o.Choice("pressure_unit")),
@@ -87,19 +102,19 @@ public:
   }
 
 private:
-  D2D1_COLOR_F TempColor(int c) const {
-    if (c < cold_) return coldCol_;
-    if (c > hot_) return hotCol_;
+  D2D1_COLOR_F TempColor(const Wheel& w, int c) const {
+    if (c < w.cold) return coldCol_;
+    if (c > w.hot) return hotCol_;
     return okCol_;
   }
 
   void DrawWheel(Painter& p, float x, float y, const Wheel& w) const {
     p.FillRounded(x, y, kBoxW, kBoxH, 4, Col::Row);
     const float sw = (kBoxW - 8) / 3.f;
-    for (int k = 0; k < 3; ++k) p.Fill(x + 4 + k * sw, y + 3, sw - 1, 3, TempColor(w.strip[k]));
+    for (int k = 0; k < 3; ++k) p.Fill(x + 4 + k * sw, y + 3, sw - 1, 3, TempColor(w, w.strip[k]));
 
     if (w.flat) p.Text(x + 5, y + 7, kBoxW * 0.55f, 22, L"FLAT", Font::TextBold, Col::Bad);
-    else p.Textf(x + 5, y + 7, kBoxW * 0.55f, 22, Font::Mid, TempColor(w.temp), Align::Left, L"%d°", w.temp);
+    else p.Textf(x + 5, y + 7, kBoxW * 0.55f, 22, Font::Mid, TempColor(w, w.temp), Align::Left, L"%d°", w.temp);
     if (unit_ == 0) p.Textf(x, y + 7, kBoxW - 5, 22, Font::Text, Col::Text, Align::Right, L"%d", w.kpa10 / 10);
     else p.Textf(x, y + 7, kBoxW - 5, 22, Font::Text, Col::Text, Align::Right, unit_ == 1 ? L"%.1f" : L"%.2f",
                  w.kpa10 / 10.0 * (unit_ == 1 ? 0.145038 : 0.01));
@@ -117,9 +132,11 @@ private:
     for (int i = 0; i < 4; ++i) {
       const TelemWheelV01& src = t.mWheel[i];
       Wheel& w = v.w[i];
+      // Surface and inner layer come as left/centre/right; the carcass is a single value.
+      const double* layer = source_ == 1 ? src.mTemperature : source_ == 0 ? src.mTireInnerLayerTemperature : nullptr;
       double sum = 0;
       for (int k = 0; k < 3; ++k) {
-        const double c = src.mTemperature[k] - 273.15;
+        const double c = (layer ? layer[k] : src.mTireCarcassTemperature) - 273.15;
         w.strip[k] = static_cast<int>(std::lround(c));
         sum += c;
       }
@@ -129,12 +146,30 @@ private:
       // The SDK comment says Celsius, but the game reports Kelvin (TinyPedal converts it too).
       w.brake = static_cast<int>(std::lround(src.mBrakeTemp - 273.15));
       w.flat = src.mFlat;
-      cold |= w.temp < cold_;
-      hot |= w.temp > hot_;
+      const double opt = OptimalC(src.mOptimalTemp);
+      if (useOptimal_ && opt > 0) {
+        w.cold = static_cast<int>(std::lround(opt)) - below_;
+        w.hot = static_cast<int>(std::lround(opt)) + above_;
+      } else {
+        w.cold = cold_;
+        w.hot = hot_;
+      }
+      cold |= w.temp < w.cold;
+      hot |= w.temp > w.hot;
     }
     v.ready = hot ? Ready::Hot : cold ? Ready::Cold : Ready::Ready;
   }
 
+  // mOptimalTemp is Celsius in LMU (0 when unknown); accept Kelvin too in case a build reports it that way.
+  static double OptimalC(float v) {
+    if (!std::isfinite(v) || v <= 0) return 0;
+    const double c = v > 200 ? v - 273.15 : v;
+    return c >= 20 && c <= 200 ? c : 0;
+  }
+
+  int source_;
+  bool useOptimal_;
+  int below_, above_;
   int cold_, hot_, unit_;
   bool showBrakes_;
   int brakeHot_;

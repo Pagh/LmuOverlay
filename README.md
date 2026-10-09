@@ -55,7 +55,7 @@ build.bat -DLMU_SDK_DIR="X:/path/Le Mans Ultimate/Support/SharedMemoryInterface"
 |---|---|
 | Ctrl+Alt+E | Move widgets (drag them; positions are saved) |
 | Ctrl+Alt+O | Show / hide overlay |
-| Ctrl+Alt+D | Switch the delta reference: your best (LMU) → session best → all-time best → lobby fastest lap |
+| Ctrl+Alt+D | Switch the delta reference: your best (LMU) → session best → all-time best → lobby fastest lap → last lap |
 | Ctrl+Alt+P | Next profile (until the session type changes) |
 | Ctrl+Alt+Q | Quit |
 
@@ -97,18 +97,18 @@ monitor's top-left corner and are always clamped onto it, so a widget can't be l
 
 | Widget | Shows |
 |---|---|
-| standings | Session info on top: session, time left, lap / estimated race laps, race length, pit stop required or not, track / air temperature, rain. Before a race starts: race length in laps and what to fill up with. Then your class: leaders + cars around you, make, best / last lap, gap (race: time behind on track; practice / qualifying: best-lap difference) |
-| delta | Live delta (number + bar) against a selectable reference: your best (LMU's own delta), session best, all-time best, or the lobby's fastest lap in your class |
+| standings | Session info on top: session, time left, lap / estimated race laps, race length, pit stop required or not, track / air temperature, rain. Before a race starts: race length in laps and what to fill up with. Then your class: leaders + cars around you, make, best / last lap, fuel + virtual energy left, tyre compound + tread, gap (race: time behind on track; practice / qualifying: best-lap difference) |
+| delta | Live delta (number + bar) against a selectable reference: your best (LMU's own delta), session best, all-time best (any car of your class), the lobby's fastest lap in your class, or your last valid lap (with the spread of your last 5 laps, for consistency) |
 | trackinfo | Small bar under the delta, only when something matters: stopped / slow car ahead with the distance in metres, local yellow, full-course yellow, blue flag, race phase, track-limit points, penalties, lap valid / invalid (practice, qualifying) |
 | sectors | Compact (default): three boxes with this lap's sector gaps to the reference + last / best / ideal lap. Table: this lap, last lap, session best, all-time best (saved in `records\`), lobby best |
 | trackmap | Circuit outline (learned from all cars' positions, saved in `records\<track>.map.ini`), every car in its class colour, yellow sectors highlighted |
-| relative | Cars nearest on track: make, last lap, best lap, last-lap sectors, gap, and how the gap changed over your last lap |
+| relative | Cars nearest on track: make, last lap, best lap, last-lap sectors, gap, and how the gap changed over your last lap; optional fuel / energy and tyres columns |
 | classwarn | Red pill when a faster class is closing in behind you ("HYPERCAR 1.8 s behind") |
 | radar | Side bars while a car is alongside (CAR LEFT / RIGHT / 3-WIDE) |
-| inputs | RPM / shift light, gear, speed, TC / cut / slip / ABS / map, brake bias, water / oil (or battery), throttle / brake trace of the last 12 s |
-| tyres | Surface temperature (with L/C/R strip), pressure, tread left, brake temperature; optional READY TO PUSH badge |
-| strategy | Races only. Pit stop required: fuel / energy, laps to the end, pit window, what to add, stop time. Otherwise a one-line fuel check |
-| damage | Only after a hit: car silhouette with the hit zones, aero and suspension damage %, repair time, lap time lost |
+| inputs | RPM / shift light, gear, speed, TC / cut / slip / ABS / map, brake bias, water / oil (or battery), throttle / brake trace of the last 12 s with lock-ups and wheel spin marked |
+| tyres | Inner-layer (or surface / carcass) temperature with L/C/R strip, coloured against the compound's optimal temperature, pressure, tread left, brake temperature; optional READY TO PUSH badge |
+| strategy | Races: pit stop required → fuel / energy, laps to the end, pit window, what to add, stop time; otherwise a one-line fuel check. Practice / qualifying: plan for the race set in Settings > General > Race plan (time or laps) |
+| damage | After a hit: car silhouette with the hit zones, aero and suspension damage %, repair time, lap time lost; for a few seconds after any contact ("CONTACT · NO DAMAGE"), with the session's contact count |
 | fuel | Detailed fuel / energy table (off by default; Strategy covers it) |
 | perf | The overlay's own cost (off by default) |
 
@@ -129,15 +129,17 @@ laps (time left divided by your pace; when the clock runs out the overall leader
 fuel / energy per lap, against a full tank / 100 % energy. If one tank can't do it, a stop is required
 and Strategy shows the plan; otherwise it's just a fuel check. Pace: your race laps, else your best this
 session, your all-time best here, LMU's estimate. Fuel / energy per lap: measured on clean laps and saved
-per track and car (`records\`), else LMU's own garage estimate.
+per track and car (`records\`), else LMU's own garage estimate. The all-time pace is per class.
 
 ### Delta references
 
 LMU's own delta only compares against your best lap. For the other references the overlay records
 "lap traces" (elapsed time every 5 m): your laps from telemetry at ~60 Hz, other cars' laps from scoring
 data (LMU updates it about 6 times per second, so a lobby reference is accurate to a few hundredths).
-Your all-time best trace is saved with your records. A lobby reference only exists for laps driven
-while the overlay was running.
+Your all-time best (lap, sectors and trace) is shared by every car of a class on a track
+(`records\<track> - class <class>.ini`); fuel / energy use stays per car (`records\<track> - <car>.ini`).
+`tools\import_results.py` seeds the class bests from LMU's own results files (`UserData\Log\Results`);
+A lobby reference only exists for laps driven while the overlay was running.
 
 ## Code layout
 

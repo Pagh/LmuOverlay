@@ -1,4 +1,6 @@
 #include "widgets/Widget.h"
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -131,6 +133,76 @@ void DrawBrand(Painter& p, float x, float y, float w, float h, const Brand& b) {
   bg.a = 0.85f;
   p.FillRounded(x, y + 3, w, h - 6, 3, bg);
   p.Text(x, y, w, h, b.code, Font::Small, Col::Text, Align::Center);
+}
+
+namespace {
+// "Medium" -> 'M', "Soft" -> 'S', "Wet" -> 'W', "Hard" -> 'H'; anything else: its first letter.
+wchar_t CompoundLetter(const char (&name)[8]) {
+  for (char c : name) {
+    if (!c) break;
+    if (isalpha(static_cast<unsigned char>(c))) return static_cast<wchar_t>(toupper(static_cast<unsigned char>(c)));
+  }
+  return 0;
+}
+D2D1_COLOR_F CompoundColor(wchar_t c) {
+  switch (c) {
+    case L'S': return Col::Rgb(0xFF5A5A);
+    case L'M': return Col::Rgb(0xFFD23F);
+    case L'H': return Col::Rgb(0xE8ECF2);
+    case L'W': return Col::Rgb(0x4DA3FF);
+    case L'I': return Col::Rgb(0x3DDC84);
+    default: return Col::Dim;
+  }
+}
+} // namespace
+
+CarState CarStateFor(const Snapshot& s, const VehicleScoringInfoV01& v) {
+  CarState c;
+  c.fuel = static_cast<int>(std::lround(v.mFuelFraction * 100.0 / 255.0));
+  const Snapshot::CarModel* m = s.CarFor(v.mID);
+  if (!m) return c;
+  const double ve = m->virtualEnergy > 1.5f ? m->virtualEnergy / 100.0 : m->virtualEnergy;
+  if (ve > 0.0) c.energy = static_cast<int>(std::lround(std::clamp(ve, 0.0, 1.0) * 100.0));
+  c.tyreF = CompoundLetter(m->tyreF);
+  c.tyreR = CompoundLetter(m->tyreR);
+  double sum = 0;
+  int n = 0;
+  for (double w : m->wear) if (w > 0.0 && w <= 1.0) { sum += w; ++n; }
+  if (n == 4) c.tread = static_cast<int>(std::lround(sum / 4 * 100.0));
+  return c;
+}
+
+void DrawCarFuel(Painter& p, float x, float y, float w, float h, const CarState& c, float alpha) {
+  auto level = [alpha](int pct, D2D1_COLOR_F normal) {
+    D2D1_COLOR_F col = pct < 10 ? Col::Bad : pct < 25 ? Col::Warn : normal;
+    col.a *= alpha;
+    return col;
+  };
+  if (c.energy >= 0) {
+    // Energy on the right (what usually runs out first), fuel left of it.
+    p.Textf(x, y, w - 2, h, Font::Small, level(c.energy, Col::Info), Align::Right, L"%d%%", c.energy);
+    if (c.fuel >= 0) p.Textf(x, y, w - 34, h, Font::Small, level(c.fuel, Col::Dim), Align::Right, L"%d", c.fuel);
+  } else if (c.fuel >= 0) {
+    p.Textf(x, y, w - 2, h, Font::Small, level(c.fuel, Col::Dim), Align::Right, L"%d%%", c.fuel);
+  }
+}
+
+void DrawCarTyres(Painter& p, float x, float y, float w, float h, const CarState& c, float alpha) {
+  float tx = x + 4;
+  auto letter = [&](wchar_t ch) {
+    D2D1_COLOR_F col = CompoundColor(ch);
+    col.a *= alpha;
+    const wchar_t s[2] = {ch, 0};
+    p.Text(tx, y, 12, h, s, Font::TextBold, col, Align::Center);
+    tx += 12;
+  };
+  if (c.tyreF) letter(c.tyreF);
+  if (c.tyreR && c.tyreR != c.tyreF) letter(c.tyreR);
+  if (c.tread >= 0) {
+    D2D1_COLOR_F col = c.tread < 30 ? Col::Bad : c.tread < 60 ? Col::Warn : Col::Dim;
+    col.a *= alpha;
+    p.Textf(x, y, w - 2, h, Font::Small, col, Align::Right, L"%d%%", c.tread);
+  }
 }
 
 void DrawPlaceholder(Painter& p, float w, float h, const wchar_t* label) {

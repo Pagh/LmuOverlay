@@ -1,5 +1,6 @@
 // Relative: the cars physically closest to you on track, ahead (top) and behind (bottom),
-// with their last lap, best lap, last-lap sectors, the gap and how it changed over the last lap.
+// with their last lap, best lap, last-lap sectors, the gap and how it changed over the last lap,
+// plus their fuel / virtual energy and tyres.
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <climits>
@@ -29,6 +30,7 @@ struct Row {
   bool secOld[3]{};         // from the previous lap (drawn dimmed)
   TimeTint lastTint = kTintNormal, bestTint = kTintNormal, secTint[3]{};
   int trendMs = INT_MIN;    // change of |gap| over your last lap (negative = closer), INT_MIN = unknown
+  CarState car;
   bool pit = false;
   bool player = false;
   bool operator==(const Row&) const = default;
@@ -56,6 +58,8 @@ const OptionDef kOptions[] = {
   OptBool("show_trend", "Column: gap change per lap", true,
           "How much the gap to each car changed over your last lap. Green: good for you\n"
           "(catching the car ahead / pulling away from the car behind)."),
+  OptBool("show_fuel", "Column: fuel / virtual energy %", false, "Fuel left, then virtual energy (blue) for cars that have it"),
+  OptBool("show_tyres", "Column: tyres", false, "Compound (front / rear if different) and tread left"),
   OptBool("show_class_stripe", "Class colour stripe", true),
   OptColor("player_row", "Your row", 0x3A4458FF),
   OptColor("text", "Text (same lap)", 0xF2F4F7FF),
@@ -80,6 +84,8 @@ public:
         timeDecimals_(o.Int("time_decimals")),
         gapDecimals_(o.Int("gap_decimals")),
         trend_(o.Bool("show_trend")),
+        fuel_(o.Bool("show_fuel")),
+        tyres_(o.Bool("show_tyres")),
         stripe_(o.Bool("show_class_stripe")),
         playerRow_(o.Color("player_row")),
         text_(o.Color("text")),
@@ -90,7 +96,7 @@ public:
 
   float Width() const override {
     return kPad * 2 + kPosW + (number_ ? kNumW : 0) + (brand_ ? kBrandW : 0) + kNameW + kTagW + (last_ ? kLapW : 0) + (best_ ? kLapW : 0) +
-           (sectors_ ? kSecW * 3 : 0) + kGapW + (trend_ ? kTrendW : 0);
+           (sectors_ ? kSecW * 3 : 0) + (fuel_ ? kCarFuelW : 0) + (tyres_ ? kCarTyreW : 0) + kGapW + (trend_ ? kTrendW : 0);
   }
   float Height() const override { return kPad * 2 + (header_ ? kHeaderH : 0) + kRowH * (2 * each_ + 1); }
 
@@ -123,6 +129,8 @@ public:
       if (best_) { p.Text(x, y, kLapW, kHeaderH, L"BEST", Font::Small, Col::Dim, Align::Right); x += kLapW; }
       if (sectors_)
         for (int k = 0; k < 3; ++k, x += kSecW) p.Textf(x, y, kSecW, kHeaderH, Font::Small, Col::Dim, Align::Right, L"S%d", k + 1);
+      if (fuel_) { p.Text(x, y, kCarFuelW - 2, kHeaderH, L"FUEL · VE", Font::Small, Col::Dim, Align::Right); x += kCarFuelW; }
+      if (tyres_) { p.Text(x, y, kCarTyreW - 2, kHeaderH, L"TYRES", Font::Small, Col::Dim, Align::Right); x += kCarTyreW; }
       p.Text(x, y, kGapW - 4, kHeaderH, L"GAP", Font::Small, Col::Dim, Align::Right);
       if (trend_) p.Text(x + kGapW, y, kTrendW - 4, kHeaderH, L"PER LAP", Font::Small, Col::Dim, Align::Right);
       y += kHeaderH;
@@ -183,6 +191,8 @@ public:
           p.Text(x, y, kSecW, kRowH, buf, Font::Small, c, Align::Right);
         }
       }
+      if (fuel_) { DrawCarFuel(p, x, y, kCarFuelW, kRowH, r.car, r.pit ? 0.5f : 1.f); x += kCarFuelW; }
+      if (tyres_) { DrawCarTyres(p, x, y, kCarTyreW, kRowH, r.car, r.pit ? 0.5f : 1.f); x += kCarTyreW; }
       if (!r.player) {
         FormatGap(buf, 24, r.gapMs, gapDecimals_);
         p.Text(x, y, kGapW - 4, kRowH, buf, Font::TextBold, text, Align::Right);
@@ -314,6 +324,7 @@ private:
     if (gap < 0 || gap > lapTime * 0.6) gap = std::fabs(d) / m.trackLength * lapTime;
     r.gapMs = Quantize(gap, 0.001);
     r.pit = o.mInPits;
+    if (fuel_ || tyres_) r.car = CarStateFor(s, o);
     r.player = idx == m.playerIdx;
     if (trend_ && !r.player) r.trendMs = Trend(m, o.mID, lapTime);
     // Total distance difference minus on-track offset = whole laps between us.
@@ -358,7 +369,7 @@ private:
   int each_;
   bool overall_, header_, number_, brand_, last_, best_, sectors_;
   int timeDecimals_, gapDecimals_;
-  bool trend_, stripe_;
+  bool trend_, fuel_, tyres_, stripe_;
   D2D1_COLOR_F playerRow_, text_, lapping_, lapped_, classBest_, personalBest_;
   View view_;
   std::unordered_map<long, History> history_;
@@ -368,5 +379,5 @@ private:
 } // namespace
 
 const WidgetType kRelativeWidget{
-  "relative", "Relative", "Cars closest to you on track: gap, last lap, best lap and last-lap sectors.",
+  "relative", "Relative", "Cars closest to you on track: gap, last lap, best lap, last-lap sectors, fuel / energy and tyres.",
   true, 16, 887, 100, kOptions, CreateWidget<RelativeWidget>};

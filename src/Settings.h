@@ -28,6 +28,12 @@ struct GeneralSettings {
   std::string profileFor[static_cast<int>(SessionKind::Count)] = {"Practice", "Qualifying", "Race"};
   std::string manualProfile = "Race";
 
+  // Race to plan for in practice / qualifying (Strategy widget).
+  bool planEnabled = true;
+  bool planByLaps = false;          // else timed
+  int planMinutes = 60;
+  int planLaps = 25;
+
   std::string updateRepo;           // GitHub "owner/name" with the releases ("" = Version.h default)
   bool updateCheckAtStart = true;
 

@@ -189,9 +189,11 @@ int main(int argc, char** argv) {
                 t.mTCCutMax, t.mTCSlip, t.mTCSlipMax, t.mABS, t.mABSMax, t.mMotorMap, t.mMotorMapMax, t.mRearBrakeBias);
     for (int w = 0; w < 4; ++w) {
       const auto& wh = t.mWheel[w];
-      std::printf("  wheel %d: temp %.1f/%.1f/%.1f K  pressure %.1f  wear %.3f  brakeTemp %.1f  carcass %.1f\n", w,
-                  wh.mTemperature[0], wh.mTemperature[1], wh.mTemperature[2], wh.mPressure, wh.mWear, wh.mBrakeTemp,
-                  wh.mTireCarcassTemperature);
+      std::printf("  wheel %d: surface %.1f/%.1f/%.1f K  inner %.1f/%.1f/%.1f K  carcass %.1f K  optimal %.1f  "
+                  "compound %u/%u  pressure %.1f  wear %.3f  brakeTemp %.1f\n", w,
+                  wh.mTemperature[0], wh.mTemperature[1], wh.mTemperature[2], wh.mTireInnerLayerTemperature[0],
+                  wh.mTireInnerLayerTemperature[1], wh.mTireInnerLayerTemperature[2], wh.mTireCarcassTemperature,
+                  wh.mOptimalTemp, wh.mCompoundIndex, wh.mCompoundType, wh.mPressure, wh.mWear, wh.mBrakeTemp);
     }
   }
   return 0;

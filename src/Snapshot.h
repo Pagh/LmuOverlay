@@ -23,10 +23,14 @@ struct Snapshot {
 
   // Per-car extras only available in the telemetry block: car model ("BMW M4 LMGT3") and the
   // world position at telemetry rate (scoring positions only update ~6 times per second).
+  // Also what's visible of each car's state: virtual energy, tyre compounds and wear.
   struct CarModel {
     long id;
     char name[30];     // not always NUL-terminated
     TelemVect3 pos;
+    float virtualEnergy;          // 0..1 (or 0..100), 0 = none
+    char tyreF[8], tyreR[8];      // compound names, truncated, not NUL-terminated
+    double wear[4];               // 1 = new
   };
   int numModels = 0;
   CarModel models[kMaxVehicles]{};

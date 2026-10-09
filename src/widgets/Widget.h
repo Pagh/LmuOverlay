@@ -119,6 +119,22 @@ struct Brand {
 Brand BrandFor(const Snapshot& s, const VehicleScoringInfoV01& v);
 void DrawBrand(Painter& p, float x, float y, float w, float h, const Brand& b);
 
+// What's visible of another car's state: fuel and virtual energy left, tyre compound and tread.
+struct CarState {
+  int fuel = -1;            // % (LMU's per-car fuel fraction), -1 unknown
+  int energy = -1;          // % virtual energy, -1 if the car has none / unknown
+  wchar_t tyreF = 0, tyreR = 0; // compound initial: S / M / H / W, 0 unknown
+  int tread = -1;           // % tread left, average of the four, -1 unknown
+  bool operator==(const CarState&) const = default;
+};
+CarState CarStateFor(const Snapshot& s, const VehicleScoringInfoV01& v);
+// Widths for the columns below (unscaled px).
+constexpr float kCarFuelW = 66.f, kCarTyreW = 56.f;
+// "62 · 48%": fuel, then energy (blue) when the car has it.
+void DrawCarFuel(Painter& p, float x, float y, float w, float h, const CarState& c, float alpha = 1.f);
+// "M 87%": compound (front/rear if different) and tread left.
+void DrawCarTyres(Painter& p, float x, float y, float w, float h, const CarState& c, float alpha = 1.f);
+
 // Timing colours: 0 normal, 1 driver's own best this session, 2 fastest in class this session.
 enum TimeTint : uint8_t { kTintNormal, kTintPersonal, kTintClass };
 TimeTint TintFor(const Timing* timing, const VehicleScoringInfoV01& v, int sector /*0..2, 3 = lap*/, double time);

@@ -1,5 +1,6 @@
 // Inputs & car: RPM / shift light, gear, speed, driver aids, brake bias, water / oil
-// temperature, and a throttle / brake trace of the last seconds.
+// temperature, and a throttle / brake trace of the last seconds with lock-ups (on the brake line)
+// and wheel spin (on the throttle line) marked.
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <cmath>
@@ -32,6 +33,10 @@ const OptionDef kOptions[] = {
   OptInt("trace_seconds", "Trace length (s)", 12, 3, 30),
   OptInt("trace_width", "Trace width (px)", 340, 120, 1200),
   OptBool("show_steering", "Steering in the trace", false),
+  OptBool("show_slip", "Mark lock-ups and wheel spin", true,
+          "A wheel turning slower (braking) or faster (on throttle) than the car moves, by more than the threshold"),
+  OptInt("lock_pct", "Lock-up threshold (% slip)", 15, 5, 60),
+  OptInt("spin_pct", "Wheel spin threshold (% slip)", 15, 5, 60),
   OptFloat("shift_yellow", "Shift light: yellow at", 0.85, 0.5, 1.0, "Fraction of the rev limit"),
   OptFloat("shift_red", "Shift light: red at", 0.93, 0.5, 1.0),
   OptFloat("shift_blue", "Shift light: shift now at", 0.97, 0.5, 1.0),
@@ -40,6 +45,8 @@ const OptionDef kOptions[] = {
   OptColor("throttle", "Throttle", 0x3DDC84FF),
   OptColor("brake", "Brake", 0xFF4D4DFF),
   OptColor("steering", "Steering", 0x9AA3B2FF),
+  OptColor("lockup", "Lock-up", 0xFFC233FF),
+  OptColor("wheelspin", "Wheel spin", 0x4DD6FFFF),
 };
 
 class InputsWidget final : public Widget {
@@ -52,6 +59,9 @@ public:
         traceSeconds_(o.Int("trace_seconds")),
         traceW_(static_cast<float>(o.Int("trace_width"))),
         steering_(o.Bool("show_steering")),
+        slip_(o.Bool("show_slip")),
+        lockPct_(o.Int("lock_pct") / 100.0),
+        spinPct_(o.Int("spin_pct") / 100.0),
         yellow_(o.Float("shift_yellow")),
         red_(o.Float("shift_red")),
         blue_(o.Float("shift_blue")),
@@ -59,7 +69,9 @@ public:
         oilHot_(o.Int("oil_hot")),
         throttle_(o.Color("throttle")),
         brake_(o.Color("brake")),
-        steer_(o.Color("steering")) {}
+        steer_(o.Color("steering")),
+        lockCol_(o.Color("lockup")),
+        spinCol_(o.Color("wheelspin")) {}
 
   float Width() const override { return kPad + kGearW + (aids_ ? kAidsW + 10 : 0) + (trace_ ? traceW_ + 10 : 0) + kPad - 2; }
   float Height() const override { return aids_ ? kH : 84.f; }
@@ -143,6 +155,10 @@ private:
   void DrawTrace(Painter& p, float x, float y, float w, float h) {
     p.Text(x, y - 2, w, 14, L"THROTTLE", Font::Small, throttle_);
     p.Text(x + 58, y - 2, w, 14, L"BRAKE", Font::Small, brake_);
+    if (slip_) {
+      p.Text(x + 104, y - 2, w, 14, L"LOCK", Font::Small, lockCol_);
+      p.Text(x + 140, y - 2, w, 14, L"SPIN", Font::Small, spinCol_);
+    }
     p.Textf(x, y - 2, w, 14, Font::Small, Col::Dim, Align::Right, L"last %d s", traceSeconds_);
     const float ty = y + 14, th = h - 14;
     p.Fill(x, ty + th / 2, w, 1, Col::Rgb(0x2B313C));
@@ -163,6 +179,19 @@ private:
     if (steering_) plot(steer_buf_, steer_, 1.2f, true);
     plot(thr_, throttle_, 2.f, false);
     plot(brk_, brake_, 2.f, false);
+    if (!slip_) return;
+    // Lock-ups as dots on the brake line, wheel spin on the throttle line.
+    for (int i = 0; i < count_; ++i) {
+      const int k = (head_ - count_ + i + kSamples) % kSamples;
+      if (!slipBuf_[k]) continue;
+      const float vx = x + w * (kSamples - count_ + i) / static_cast<float>(kSamples - 1);
+      auto dot = [&](const uint8_t* src, D2D1_COLOR_F c) {
+        const float vy = ty + 1 + (th - 2) * (1.f - src[k] / 200.f);
+        p.Fill(vx - 2.f, vy - 2.f, 4.f, 4.f, c);
+      };
+      if (slipBuf_[k] & 1) dot(brk_, lockCol_);
+      if (slipBuf_[k] & 2) dot(thr_, spinCol_);
+    }
   }
 
   void Sample(const Model& m, const TelemInfoV01& t) {
@@ -174,9 +203,29 @@ private:
     thr_[head_] = static_cast<uint8_t>(std::lround(std::clamp(t.mUnfilteredThrottle, 0.0, 1.0) * 200.0));
     brk_[head_] = static_cast<uint8_t>(std::lround(std::clamp(t.mUnfilteredBrake, 0.0, 1.0) * 200.0));
     steer_buf_[head_] = static_cast<uint8_t>(std::lround((std::clamp(t.mUnfilteredSteering, -1.0, 1.0) + 1.0) * 100.0));
+    slipBuf_[head_] = slip_ ? SlipFlags(t) : 0;
     head_ = (head_ + 1) % kSamples;
     count_ = std::min(count_ + 1, kSamples);
     ++seq_;
+  }
+
+  // Wheel surface speed vs car speed: bit 1 = lock-up (a wheel much slower while braking),
+  // bit 2 = wheel spin (a wheel much faster on throttle). Below ~30 km/h the ratio is meaningless.
+  uint8_t SlipFlags(const TelemInfoV01& t) const {
+    const double speed = std::fabs(t.mLocalVel.z); // forward speed (z points backwards)
+    if (speed < 8.0) return 0;
+    double lo = 1e9, hi = 0;
+    for (const TelemWheelV01& wh : t.mWheel) {
+      if (wh.mStaticUndeflectedRadius == 0 || wh.mDetached) continue;
+      const double ratio = std::fabs(wh.mRotation) * wh.mStaticUndeflectedRadius * 0.01 / speed;
+      lo = std::min(lo, ratio);
+      hi = std::max(hi, ratio);
+    }
+    if (hi <= 0) return 0;
+    uint8_t f = 0;
+    if (t.mUnfilteredBrake > 0.05 && lo < 1.0 - lockPct_) f |= 1;
+    if (t.mUnfilteredThrottle > 0.05 && hi > 1.0 + spinPct_) f |= 2;
+    return f;
   }
 
   void Build(const TelemInfoV01& t, View& v) const {
@@ -206,13 +255,14 @@ private:
   bool mph_, aids_, trace_;
   int traceSeconds_;
   float traceW_;
-  bool steering_;
+  bool steering_, slip_;
+  double lockPct_, spinPct_;
   float yellow_, red_, blue_;
   int waterHot_, oilHot_;
-  D2D1_COLOR_F throttle_, brake_, steer_;
+  D2D1_COLOR_F throttle_, brake_, steer_, lockCol_, spinCol_;
   View view_;
 
-  uint8_t thr_[kSamples]{}, brk_[kSamples]{}, steer_buf_[kSamples]{};
+  uint8_t thr_[kSamples]{}, brk_[kSamples]{}, steer_buf_[kSamples]{}, slipBuf_[kSamples]{};
   int head_ = 0, count_ = 0;
   uint32_t seq_ = 0;
   double lastSample_ = 0;
@@ -221,5 +271,5 @@ private:
 } // namespace
 
 const WidgetType kInputsWidget{
-  "inputs", "Inputs & car", "Gear, speed, RPM, TC / ABS / map, brake bias, water / oil, and a throttle / brake trace.",
+  "inputs", "Inputs & car", "Gear, speed, RPM, TC / ABS / map, brake bias, water / oil, and a throttle / brake trace with lock-ups and wheel spin.",
   true, 684, 872, 16, kOptions, CreateWidget<InputsWidget>};

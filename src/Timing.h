@@ -5,6 +5,8 @@
 #include <string>
 #include <unordered_map>
 
+class IniDoc;
+
 // Individual sector times (not cumulative) and the lap time. 0 = unknown.
 struct SectorSet {
   double s[3] = {0, 0, 0};
@@ -18,7 +20,7 @@ struct SectorSet {
 bool SectorsFromCumulative(double s1, double s12, double lap, SectorSet& out);
 
 // What the live delta is measured against.
-enum class DeltaRef { LmuBest, SessionBest, AllTime, Lobby, Count };
+enum class DeltaRef { LmuBest, SessionBest, AllTime, Lobby, LastLap, Count };
 const wchar_t* DeltaRefLabel(DeltaRef r);
 
 // Lap / sector bookkeeping for the whole field, plus the player's all-time records.
@@ -60,6 +62,8 @@ public:
   // Lap time of a reference (lobby: the fastest lap in your class as LMU reports it, fixed for
   // the length of each of your laps). 0 = none.
   double ReferenceLap(DeltaRef ref) const;
+  // Spread (standard deviation, s) of your last valid laps; 0 until 3 of them. laps = how many.
+  double Consistency(int* laps = nullptr) const;
   const std::string& LobbyHolder() const { return lobbyRefHolder_; }
   const SectorSet& LobbyLap() const { return lobbyRef_; }     // sectors of that lap (may be incomplete)
   bool OutLap() const { return outLap_; }
@@ -69,7 +73,8 @@ public:
   // (best trace available). < 0 if no lap has been recorded here yet.
   double TimeAlong(double a, double b) const;
 
-  // Fuel / virtual energy use per lap remembered for this track and car (0 = unknown).
+  // All-time bests (PlayerAllTime, the ALL-TIME delta trace) are shared by the cars of a class;
+  // fuel / virtual energy use per lap is remembered for this track and car (0 = unknown).
   double SavedFuelPerLap() const { return fuelPerLap_; }
   double SavedEnergyPerLap() const { return energyPerLap_; }
   void RecordConsumption(double fuelPerLap, double energyPerLap);
@@ -89,8 +94,11 @@ private:
   void Reset();
   void OnPlayerLap(const SectorSet& lap, bool valid, bool damaged);
   void PairTrace(Vehicle& vt, const VehicleScoringInfoV01& v, bool isPlayer, bool playerClass, double et);
-  void LoadRecords(const std::string& track, const std::string& car);
-  void SaveRecords() const;
+  void LoadRecords(const std::string& track, const std::string& car, const std::string& cls);
+  void SaveRecords() const;              // all-time best (+ trace) to BestFile()
+  void PutUsage(IniDoc& doc) const;
+  std::wstring CarFile() const;          // records\<track> - <car>.ini: fuel / energy use
+  std::wstring BestFile() const;         // records\<track> - class <class>.ini (car file without a class)
   void LoadMap(const std::string& track, double length);
   void SaveMap();
 
@@ -100,7 +108,7 @@ private:
 
   long session_ = -1;
   double lastET_ = -1;
-  std::string track_, car_;
+  std::string track_, car_, class_;
 
   SectorSet playerLast_, playerSession_, allTime_;
   bool playerLastValid_ = true;
@@ -109,13 +117,17 @@ private:
   double lapChangeTime_ = -100; // telemetry time of the last lap-number change
 
   LapTrace sessionTrace_, allTimeTrace_, lobbyTrace_; // lobbyTrace_: fastest class lap recorded live
+  LapTrace lastTrace_;                               // your last valid lap (consistency reference)
+  static constexpr int kRecent = 5;
+  double recent_[kRecent]{};                         // your last valid lap times
+  int recentN_ = 0, recentHead_ = 0;
   SectorSet lobbyRef_;                               // lobby fastest lap (LMU's numbers), per lap of yours
   std::string lobbyRefHolder_;
   long lobbyRefKey_ = -100;                          // your lap count when it was taken
   double lmuDelta_ = 0, playerBest_ = 0;             // LMU's own delta and your best lap
   bool outLap_ = false, outBaseSet_ = false;
-  double outBase_[4]{};
-  bool outBaseOk_[4]{};
+  double outBase_[static_cast<int>(DeltaRef::Count)]{};
+  bool outBaseOk_[static_cast<int>(DeltaRef::Count)]{};
   double curD_ = 0, curT_ = 0;
   bool curValid_ = false;
   double curTrackLength_ = 0;

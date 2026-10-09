@@ -1,5 +1,6 @@
 // Live delta against a chosen reference lap: your best (LMU's own delta), your session best,
-// your all-time best on this track/car, or the lobby's fastest lap in your class.
+// your all-time best on this track (any car of your class), the lobby's fastest lap in your class,
+// or your last valid lap (to drive consistently, with the spread of your last laps).
 // A wide, low bar: reference on the left, delta in the middle, the lap you're on (predicted
 // time, even if invalidated) on the right. Ctrl+Alt+D or a wheel button cycles the reference.
 #include "widgets/Widget.h"
@@ -19,6 +20,7 @@ struct View {
   bool invalid = false;
   DeltaRef ref = DeltaRef::LmuBest;
   int refLapMs = 0;
+  int spreadCs = -1;         // last-lap reference: spread of your last laps, 0.01 s (-1 = not yet)
   int predictedMs = 0;       // reference + delta
   int lapDs = 0;             // current lap time, 0.1 s
   bool flash = false;        // reference just changed
@@ -26,9 +28,10 @@ struct View {
 };
 
 const OptionDef kOptions[] = {
-  OptChoice("reference", "Reference lap", "your best (LMU)|session best|all-time best|lobby fastest lap", 0,
+  OptChoice("reference", "Reference lap", "your best (LMU)|session best|all-time best|lobby fastest lap|last lap", 0,
             "Ctrl+Alt+D (or a wheel button, Settings > General) switches it while driving.\n"
-            "Lobby fastest lap: the quickest lap in your class this session, as LMU reports it."),
+            "Lobby fastest lap: the quickest lap in your class this session, as LMU reports it.\n"
+            "Last lap: your previous valid lap, to drive consistently; also shows the spread (±) of your last 5 laps."),
   OptInt("decimals", "Decimals", 3, 1, 3),
   OptInt("width", "Width (px)", 440, 260, 900),
   OptFloat("range", "Bar range (s)", 2.0, 0.2, 10.0, "Delta at which the bar is full"),
@@ -71,7 +74,10 @@ public:
     wchar_t buf[48];
     if (showRef_) {
       const D2D1_COLOR_F c = v.flash ? Col::Warn : Col::Dim;
-      p.Textf(kPad, 3, kSideW, 16, Font::Small, c, Align::Left, L"vs %ls", DeltaRefLabel(v.ref));
+      if (v.spreadCs >= 0)
+        p.Textf(kPad, 3, kSideW, 16, Font::Small, c, Align::Left, L"vs %ls  ±%.2f", DeltaRefLabel(v.ref), v.spreadCs / 100.0);
+      else
+        p.Textf(kPad, 3, kSideW, 16, Font::Small, c, Align::Left, L"vs %ls", DeltaRefLabel(v.ref));
       if (v.refLapMs > 0) {
         FormatLapTime(buf, 48, v.refLapMs / 1000.0);
         p.Text(kPad, 17, kSideW, 18, buf, Font::TextBold, v.flash ? Col::Warn : Col::Text);
@@ -119,6 +125,10 @@ private:
     const double refLap = tm.ReferenceLap(m.deltaRef);
     v.hasRef = refLap > 0;
     if (v.hasRef) v.refLapMs = static_cast<int>(std::lround(refLap * 1000.0));
+    if (m.deltaRef == DeltaRef::LastLap) {
+      const double spread = tm.Consistency();
+      if (spread > 0) v.spreadCs = static_cast<int>(std::lround(spread * 100.0));
+    }
     const double lapT = tm.CurrentLapTime();
     if (lapT > 0 && !m.player->mInPits) v.lapDs = static_cast<int>(lapT * 10.0);
     v.outLapWait = tm.OutLapWaiting() && !m.player->mInPits && v.hasRef;
@@ -142,5 +152,5 @@ private:
 } // namespace
 
 const WidgetType kDeltaWidget{
-  "delta", "Delta", "Live delta to a reference lap: your best, session best, all-time best or the lobby's fastest.",
+  "delta", "Delta", "Live delta to a reference lap: your best, session best, all-time best, the lobby's fastest or your last lap.",
   true, 740, 128, 33, kOptions, CreateWidget<DeltaWidget>};

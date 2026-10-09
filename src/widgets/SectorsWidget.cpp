@@ -33,7 +33,7 @@ struct View {
   bool valid = false;
   int lap = 0;
   int current = 0;           // sector in progress (0..2)
-  int refKind = 0;           // 0 session, 1 all-time, 2 lobby
+  int refKind = 0;           // 0 session, 1 all-time, 2 lobby, 3 last valid lap
   Cell cells[kRows][4];      // S1 S2 S3 LAP
   Cell compact[3];
   int refMs[3]{};            // compact: reference sector times
@@ -45,7 +45,7 @@ struct View {
 const OptionDef kOptions[] = {
   OptChoice("layout", "Layout", "compact|table", 0,
             "Compact: this lap's sectors against one reference.\nTable: every reference at once."),
-  OptChoice("compare_to", "Compare this lap to", "same as Delta|session best|all-time best|lobby best", 0,
+  OptChoice("compare_to", "Compare this lap to", "same as Delta|session best|all-time best|lobby best|last lap", 0,
             "'Same as Delta' follows the Delta widget's reference (Ctrl+Alt+D)."),
   OptBool("show_last", "Table row: last lap", true),
   OptBool("show_session", "Table row: session best", true),
@@ -134,7 +134,7 @@ private:
 
   void DrawCompact(Painter& p) const {
     const float w = kCompactW;
-    static const wchar_t* const kRef[] = {L"SESSION BEST", L"ALL-TIME BEST", L"LOBBY BEST"};
+    static const wchar_t* const kRef[] = {L"SESSION BEST", L"ALL-TIME BEST", L"LOBBY BEST", L"LAST LAP"};
     p.Textf(kPad, kPad - 2, 200, 18, Font::Small, Col::Dim, Align::Left, L"SECTORS  vs %ls", kRef[view_.refKind]);
     p.Textf(w - 108, kPad - 2, 100, 18, Font::Small, Col::Dim, Align::Right, L"LAP %d", view_.lap);
 
@@ -225,13 +225,14 @@ private:
 
   // References are taken when a lap starts and kept for that lap (and for showing it as "last lap"
   // afterwards): otherwise a sector you just set would already be the reference it's compared to.
-  struct Refs { SectorSet session, allTime, lobby; };
+  struct Refs { SectorSet session, allTime, lobby, last; };
 
   void FreezeRefs(const Model& m) {
     const Timing& tm = *m.timing;
     const VehicleScoringInfoV01& me = *m.player;
     const Timing::ClassBest* cls = tm.Class(me.mVehicleClass);
-    Refs now{tm.PlayerSession(), tm.PlayerAllTime(), cls ? cls->best : SectorSet{}};
+    Refs now{tm.PlayerSession(), tm.PlayerAllTime(), cls ? cls->best : SectorSet{},
+             tm.PlayerLastValid() ? tm.PlayerLast() : cur_.last};
     if (me.mTotalLaps != lapKey_) {
       prev_ = haveRefs_ ? cur_ : now;
       cur_ = now;
@@ -257,9 +258,10 @@ private:
     v.current = me.mSector == 1 ? 0 : me.mSector == 2 ? 1 : 2; // LMU: 1=S1, 2=S2, 0=S3
 
     // Reference: follows the Delta widget unless set explicitly.
-    if (compareTo_ == 0) v.refKind = m.deltaRef == DeltaRef::AllTime ? 1 : m.deltaRef == DeltaRef::Lobby ? 2 : 0;
+    if (compareTo_ == 0)
+      v.refKind = m.deltaRef == DeltaRef::AllTime ? 1 : m.deltaRef == DeltaRef::Lobby ? 2 : m.deltaRef == DeltaRef::LastLap ? 3 : 0;
     else v.refKind = compareTo_ - 1;
-    const SectorSet& ref = v.refKind == 1 ? allTime : v.refKind == 2 ? lobby : session;
+    const SectorSet& ref = v.refKind == 1 ? allTime : v.refKind == 2 ? lobby : v.refKind == 3 ? cur_.last : session;
     for (int k = 0; k < 3; ++k) v.refMs[k] = Ms(ref.s[k]);
 
     auto tintVs = [&](const Refs& r, int k, double time) -> Tint { // k = 0..2 sector, 3 = lap
@@ -286,7 +288,7 @@ private:
       return ref.s[k] > 0 ? Cell{DeltaMs(time - ref.s[k]), kDelta, tint(k, time)} : Cell{Ms(time), kTime, tint(k, time)};
     };
     // Last lap's results against the references it was driven against.
-    const SectorSet& prevRef = v.refKind == 1 ? prev_.allTime : v.refKind == 2 ? prev_.lobby : prev_.session;
+    const SectorSet& prevRef = v.refKind == 1 ? prev_.allTime : v.refKind == 2 ? prev_.lobby : v.refKind == 3 ? prev_.last : prev_.session;
     auto lastCell = [&](int k, double time) {
       const Tint tt = tintVs(prev_, k, time);
       return prevRef.s[k] > 0 ? Cell{DeltaMs(time - prevRef.s[k]), kDelta, tt} : Cell{Ms(time), kTime, tt};

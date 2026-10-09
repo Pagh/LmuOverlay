@@ -41,7 +41,7 @@ viene sostituito e riavviato da solo; impostazioni, profili e record restano.
 |---|---|
 | Ctrl+Alt+E | Sposta i widget (trascinali col mouse; la posizione si salva da sola). Premi di nuovo per finire |
 | Ctrl+Alt+O | Mostra / nascondi l'overlay |
-| Ctrl+Alt+D | Cambia il giro di riferimento del delta: tuo best (LMU) → best della sessione → best di sempre → giro più veloce della lobby |
+| Ctrl+Alt+D | Cambia il giro di riferimento del delta: tuo best (LMU) → best della sessione → best di sempre → giro più veloce della lobby → ultimo giro |
 | Ctrl+Alt+P | Passa al profilo successivo (finché non cambia il tipo di sessione) |
 | Ctrl+Alt+Q | Chiudi l'overlay |
 
@@ -113,15 +113,16 @@ rimanente, durata della gara, se serve un pit stop oppure no, temperatura pista 
 mettere, calcolata per la gara più un giro di margine). Così sai sempre quanto caricare.
 
 Sotto, la tua classe: i primi della classe più le macchine intorno a te, con numero, marca, miglior giro,
-ultimo giro, distacco e carburante / energia rimasta. In gara il distacco è il tempo in pista; in prova e
-qualifica è la differenza tra i migliori giri.
+ultimo giro, distacco, **carburante ed energia virtuale** rimasti (`62  48%`: carburante a sinistra, energia
+in blu a destra) e **gomme** (mescola S / M / H / W, anteriore e posteriore se diverse, e battistrada
+rimasto). In gara il distacco è il tempo in pista; in prova e qualifica è la differenza tra i migliori giri.
 
 | Opzione | Cosa fa |
 |---|---|
 | Rows (10) | Righe mostrate |
 | Always show top (3) | Quanti leader mostrare sempre prima delle macchine intorno a te |
 | Session info / Track / air temperature and rain | Mostra la scheda sessione e il meteo |
-| Column: car number / car make / best lap / last lap / fuel | Accende o spegne le colonne |
+| Column: car number / car make / best lap / last lap / fuel / tyres | Accende o spegne le colonne |
 | Show pit stop count | Numero di soste di ogni pilota |
 | Gap to (leader) | Distacco dal leader o dalla macchina davanti |
 | Gap decimals / Lap time decimals (3) | Decimali di distacchi e tempi |
@@ -141,10 +142,15 @@ Riferimenti disponibili:
 
 - **your best (LMU)**: il delta di LMU sul tuo miglior giro.
 - **session best**: il tuo miglior giro di questa sessione.
-- **all-time best**: il tuo miglior giro di sempre su questa pista con questa macchina, salvato tra una
-  sessione e l'altra.
+- **all-time best**: il tuo miglior giro di sempre su questa pista con una macchina della stessa
+  classe (es. tutte le LMP3 insieme), salvato tra una sessione e l'altra. I consumi invece restano
+  per singola macchina. Per recuperare i giri fatti prima dell'overlay (anche con TinyPedal o GoFast)
+  dai risultati salvati da LMU: `py tools\import_results.py --write`, a overlay chiuso.
 - **lobby fastest lap**: il giro più veloce della tua classe nella lobby. Funziona per i giri fatti mentre
   l'overlay era aperto.
+- **last lap**: il tuo ultimo giro valido, per essere **costante** in gara. Accanto al nome compare anche
+  la **dispersione** degli ultimi 5 giri puliti (`vs LAST LAP ±0.21`): più è bassa, più sei costante.
+  I giri dei box, nel traffico o con un errore (oltre il 107 % del tuo best) non contano.
 
 | Opzione | Cosa fa |
 |---|---|
@@ -186,7 +192,7 @@ dai box S1 mostra `OUT LAP` e il confronto parte da S2.
 | Opzione | Cosa fa |
 |---|---|
 | Layout (compact) | Compact o table |
-| Compare this lap to (same as Delta) | Riferimento: lo stesso del Delta, best sessione, best di sempre, best lobby |
+| Compare this lap to (same as Delta) | Riferimento: lo stesso del Delta, best sessione, best di sempre, best lobby, ultimo giro |
 | Table row: ... | Righe della tabella |
 | Show ideal lap | Mostra IDEAL |
 | Decimals (3) | Decimali |
@@ -215,6 +221,7 @@ giro precedente sono attenuati.
 | Cars ahead / behind (3) | Macchine mostrate per lato |
 | Position shown (class) | Posizione di classe o assoluta |
 | Column: ... | Numero, marca, ultimo / miglior giro, settori, PER LAP |
+| Column: fuel / tyres (spente) | Carburante / energia e gomme degli altri, come nella classifica. Allargano il widget: controlla che non copra Inputs |
 | Class colour stripe | Striscia col colore della classe |
 
 ### Faster class warning (avviso classe più veloce)
@@ -239,6 +246,8 @@ Due barre laterali che si accendono quando hai una macchina affiancata: `CAR LEF
 - Griglia aiuti: **TC**, **CUT**, **SLIP**, **ABS**, **BIAS** (ripartizione freni), **MAP**, temperatura
   **WATER** e **OIL** (o batteria sulle ibride). Si illuminano quando intervengono o sono troppo alti.
 - Grafico di **acceleratore e freno** degli ultimi 12 secondi, utile per vedere come freni e come riapri.
+  I **bloccaggi** sono puntini gialli sulla linea del freno (una ruota gira molto più piano della
+  macchina), il **pattinamento** puntini azzurri sulla linea dell'acceleratore (una ruota gira più veloce).
 
 | Opzione | Cosa fa |
 |---|---|
@@ -246,25 +255,34 @@ Due barre laterali che si accendono quando hai una macchina affiancata: `CAR LEF
 | Driver aids, bias, temperatures | Mostra la griglia aiuti |
 | Throttle / brake trace / Trace length (12 s) / Trace width (340 px) | Grafico dei pedali |
 | Steering in the trace | Aggiunge lo sterzo al grafico |
+| Mark lock-ups and wheel spin / thresholds (15 %) | Puntini di bloccaggio e pattinamento; la soglia è lo slittamento minimo |
 | Shift light: yellow / red / shift now | A che frazione del limitatore si accende la luce |
 | Water / Oil hot above (105 / 125 °C) | Soglie di allarme |
 
 ### Tyres & brakes (gomme e freni)
 
-Per ogni gomma: temperatura (con interno / centro / esterno), pressione, battistrada rimasto e
-temperatura del freno. Blu = fredda, verde = in finestra, rosso = calda. Con **"Ready to push" badge**
+Per ogni gomma: temperatura (con sinistra / centro / destra), pressione, battistrada rimasto e
+temperatura del freno. Blu = fredda, verde = in finestra, rosso = calda. La finestra parte dalla
+**temperatura ottimale della mescola** che LMU comunica (ottimale −20 / +15 °C). Con **"Ready to push" badge**
 mostra `READY TO PUSH`, `WARMING UP` o `TOO HOT`: comodo in qualifica.
+
+LMU espone tre temperature diverse: **Inner layer** (strato di gomma sopra la carcassa, stabile: è
+quella da guardare), **Surface** (pelle del battistrada, sale e scende dentro una curva) e
+**Carcass** (carcassa, lentissima). A ogni giro il log (`bin\logs\overlay.log`, riga `tyres`) le
+scrive tutte e tre, con l'ottimale.
 
 | Opzione | Cosa fa |
 |---|---|
-| Tyre cold below / hot above (70 / 105 °C) | Finestra di temperatura |
+| Temperature shown (Inner layer) | Quale temperatura mostrare |
+| Window from the tyre's optimal temperature (sì) / below (20) / above (15 °C) | Finestra intorno all'ottimale |
+| Fixed: tyre cold below / hot above (70 / 105 °C) | Finestra fissa, se l'ottimale non c'è o l'opzione è spenta |
 | Pressure unit (kPa) | kPa, psi o bar |
 | Show brake temperature / Brake hot above (800 °C) | Freni |
 | "Ready to push" badge | Badge pronto a spingere |
 
 ### Strategy (strategia)
 
-**Solo in gara.** LMU non dice se il pit stop è obbligatorio, quindi l'overlay lo calcola: giri stimati
+**In gara** usa la gara vera; in prova e qualifica usa il piano gara che imposti tu (vedi sotto). LMU non dice se il pit stop è obbligatorio, quindi l'overlay lo calcola: giri stimati
 della gara × consumo per giro, confrontato con un pieno (o il 100 % di energia virtuale). Nelle gare a
 tempo conta che, allo scadere, il leader assoluto finisce il giro.
 
@@ -278,13 +296,35 @@ di sempre.
 
 Opzione: **One-line fuel check when no stop is needed** (acceso).
 
+**In prova e qualifica: il piano gara.** Prova e qualifica non sanno che gara verrà dopo, quindi la
+imposti tu: Impostazioni → General → **Race plan** → *Time* (minuti) oppure *Laps* (giri). Strategy
+mostra allora `RACE PLAN · 1 h` con:
+
+- giri che farai (al tuo passo della sessione) e consumo per giro di carburante / energia;
+- quanti giri dura un pieno;
+- con cosa partire, oppure `full` se serve una sosta;
+- `NO STOP` con i giri di margine all'arrivo, oppure il numero di soste, entro che giro fermarti la
+  prima volta, quanto aggiungere a ogni sosta e il tempo della sosta.
+
+Si aggiorna giro dopo giro mentre il passo e il consumo si stabilizzano. Finché manca un giro pulito
+mostra `drive a clean lap to measure`. Nella finestra Impostazioni, sotto il piano, vedi subito il
+risultato (es. "about 29 laps, 1 pit stop").
+
 ### Damage (danni)
 
 Compare **solo dopo un contatto**: sagoma dell'auto con le zone colpite, danno aerodinamico e alle
 sospensioni in %, tempo di riparazione e **quanto tempo perdi al giro** rispetto a prima del danno.
 Aero, sospensioni e riparazione richiedono *LMU REST API* acceso (General).
 
-Opzione: **Show when there's no damage** (spento).
+Dopo **ogni tocco** (con un'altra macchina o un muro) compare per qualche secondo anche se non ci sono
+danni: `CONTACT · NO DAMAGE` con la forza dell'urto (`hit 240`), così sai subito se il contatto ti ha
+fatto danni. In basso conta i contatti della sessione.
+
+| Opzione | Cosa fa |
+|---|---|
+| Show when there's no damage (spento) | Sempre visibile |
+| Show after a contact (acceso) / Contact shown for (6 s) | Compare dopo un tocco e per quanto |
+| Ignore contacts weaker than (20) | Ignora i colpetti (cordoli, sfioramenti) |
 
 ### Fuel / Energy (carburante, spento di default)
 
@@ -352,3 +392,19 @@ Tutto nella cartella dell'exe (Impostazioni → General → **Open settings fold
 Per rimettere un widget com'era usa *Reset to defaults*. Per ripartire da zero con tutti i profili, chiudi
 l'overlay e svuota la cartella `profiles`: al prossimo avvio vengono ricreati Practice, Qualifying e Race
 con i valori predefiniti. Gli aggiornamenti non toccano questi file.
+
+## Salvare una sessione
+
+LMU salva da solo ogni sessione in `UserData\Log\Results` (un file `.xml` con tutti i giri) e il replay
+in `UserData\Replays`, ma i replay vecchi prima o poi spariscono. Per tenere un evento (prove, qualifica
+e gara) con un riassunto leggibile, a gioco chiuso o nel menu:
+
+```
+py tools\session_report.py
+```
+
+Crea la cartella `LMU - Sessioni\<data> <pista> - <macchina>` accanto alla cartella dell'overlay con i
+file dei risultati, i replay e `report.html`: posizione, i tuoi giri con i settori (migliori in viola),
+giro ideale, media dei giri puliti e costanza, penalità, track limits e la classifica di classe.
+`--no-replays` salva solo risultati e report (i replay di una gara lunga pesano quasi 1 GB). Per
+rivedere un replay salvato, rimetti il `.Vcr` in `UserData\Replays`.

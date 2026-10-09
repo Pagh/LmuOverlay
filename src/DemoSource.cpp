@@ -159,6 +159,10 @@ void DemoSource::Fill(Snapshot& s, double t) {
     const double left = alongside && i == kPlayer + 1 ? 3.6 : 1.5 * std::sin(i * 1.7);
     v.mPos = s.models[i].pos = CarPos(v.mLapDist, left);
     v.mFuelFraction = static_cast<unsigned char>(255.0 * (1.0 - std::fmod(dist[i] / kTrackLen, 14.0) / 14.0));
+    s.models[i].virtualEnergy = static_cast<float>(0.9 - 0.06 * std::fmod(dist[i] / kTrackLen, 14.0));
+    strncpy_s(s.models[i].tyreF, i % 3 == 0 ? "Soft" : "Medium", _TRUNCATE);
+    strncpy_s(s.models[i].tyreR, "Medium", _TRUNCATE);
+    for (double& w : s.models[i].wear) w = 0.97 - 0.02 * i;
   }
 
   // Player telemetry.
@@ -212,7 +216,9 @@ void DemoSource::Fill(Snapshot& s, double t) {
     TelemWheelV01& wh = tm.mWheel[w];
     const double base = 355.0 + (w < 2 ? 6.0 : 2.0) + 4.0 * std::sin(t * 0.2 + w);
     wh.mTemperature[0] = base + 3.0; wh.mTemperature[1] = base; wh.mTemperature[2] = base - 2.0;
+    for (int k = 0; k < 3; ++k) wh.mTireInnerLayerTemperature[k] = wh.mTemperature[k] + 1.0;
     wh.mTireCarcassTemperature = base - 4.0;
+    wh.mOptimalTemp = 85.0f; // Celsius, like the game
     wh.mPressure = 170.0 + w * 1.5;
     wh.mWear = 1.0 - std::fmod(t, 3000.0) / 3000.0 * (w < 2 ? 0.30 : 0.24);
     wh.mBrakeTemp = 273.15 + 450.0 + (braking ? 250.0 : 0.0) + w * 10.0; // Kelvin, like the game

@@ -201,6 +201,7 @@ void App::Tick(double now) {
   liveModel_.deltaRefChangedAt = demoModel_.deltaRefChangedAt = deltaRefChangedAt_;
   // Remember fuel / energy use per lap for this track and car (pre-race fuel planning).
   if (liveModel_.onTrack) liveTiming_.RecordConsumption(liveModel_.fuel.PerLap(), liveModel_.energy.PerLap());
+  liveModel_.planCfg = demoModel_.planCfg = {gs_.planEnabled, gs_.planByLaps, gs_.planMinutes, gs_.planLaps};
   liveModel_.UpdateRace();
 
   // Preview (settings open) and layout editing show demo data when you're not on track,
@@ -312,7 +313,9 @@ void App::LogSession(double now) {
            r.energyPerLap * 100.0, r.totalLaps, r.lapsToGo, r.lapsInTank, r.lapsOnFull,
            !r.stopKnown ? "unknown" : r.stopRequired ? "REQUIRED" : "not needed", r.stopsLeft, r.windowOpen,
            r.windowClose, r.pace);
+      LogTyres(m);
     }
+    if (m.telem) TrackTyreMax(*m.telem);
   }
   // Once a minute: the overlay's own cost.
   if (now - perfLogAt_ >= 60.0) {
@@ -333,6 +336,31 @@ void App::LogSession(double now) {
     perfHoldMax_ = 0;
     perfSeconds_ = 0;
   }
+}
+
+static double Avg3(const double* v) { return (v[0] + v[1] + v[2]) / 3.0 - 273.15; }
+
+// Peak surface / inner-layer averages per tyre during the lap, for the per-lap tyre line.
+void App::TrackTyreMax(const TelemInfoV01& t) {
+  for (int i = 0; i < 4; ++i) {
+    tyreMaxSurface_[i] = std::max(tyreMaxSurface_[i], Avg3(t.mWheel[i].mTemperature));
+    tyreMaxInner_[i] = std::max(tyreMaxInner_[i], Avg3(t.mWheel[i].mTireInnerLayerTemperature));
+  }
+}
+
+// One line per lap with every tyre temperature LMU exposes (°C), to compare with the in-game display.
+void App::LogTyres(const Model& m) {
+  if (!m.telem) return;
+  char buf[512];
+  int n = std::snprintf(buf, sizeof(buf), "tyres FL/FR/RL/RR now surface|inner|carcass (lap max surface|inner), optimal:");
+  for (int i = 0; i < 4 && n > 0 && n < static_cast<int>(sizeof(buf)); ++i) {
+    const TelemWheelV01& w = m.telem->mWheel[i];
+    n += std::snprintf(buf + n, sizeof(buf) - n, " %.0f|%.0f|%.0f (%.0f|%.0f) opt %.1f%s", Avg3(w.mTemperature),
+                       Avg3(w.mTireInnerLayerTemperature), w.mTireCarcassTemperature - 273.15, tyreMaxSurface_[i],
+                       tyreMaxInner_[i], w.mOptimalTemp, i < 3 ? " ;" : "");
+    tyreMaxSurface_[i] = tyreMaxInner_[i] = -300.0;
+  }
+  Logf("%s", buf);
 }
 
 void App::UpdateRest(double now) {

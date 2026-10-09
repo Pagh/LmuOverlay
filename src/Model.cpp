@@ -106,6 +106,52 @@ double Model::LiveLapDist(const VehicleScoringInfoV01& v) const {
 }
 
 void Model::UpdateRace() {
+  UpdateRaceInfo();
+  UpdatePlan();
+}
+
+// Practice / qualifying: the strategy for the race set in Settings, from this session's pace and use.
+void Model::UpdatePlan() {
+  plan = RacePlan{};
+  const RaceInfo& r = race;
+  if (!planCfg.enabled || !r.valid || r.race) return;
+  RacePlan& p = plan;
+  p.valid = true;
+  p.byLaps = planCfg.byLaps;
+  p.minutes = planCfg.minutes;
+  p.pace = r.pace;
+  p.usesEnergy = r.usesEnergy;
+  p.fuelPerLap = r.fuelPerLap;
+  p.energyPerLap = r.usesEnergy ? r.energyPerLap : 0.0;
+  p.fuelCap = r.fuelCap;
+  p.lapsOnFull = r.lapsOnFull;
+  p.energyLimited = r.usesEnergy && r.energyPerLap > 0 && (r.fuelPerLap <= 0 || r.fuelCap <= 0 ||
+                                                           1.0 / r.energyPerLap < r.fuelCap / r.fuelPerLap);
+  // Timed: the leader finishes the lap they're on when the clock runs out; at your pace that's
+  // the next whole lap.
+  if (p.byLaps) p.totalLaps = planCfg.laps;
+  else if (p.pace > 0) p.totalLaps = std::ceil(planCfg.minutes * 60.0 / p.pace - 1e-6);
+  if (p.totalLaps <= 0 || p.lapsOnFull <= 0) return;
+  p.ready = true;
+
+  // Start full when a stop is needed; each stop then adds an equal share of the rest (+1 lap spare).
+  const double need = p.totalLaps + 1.0;
+  p.stops = p.totalLaps > p.lapsOnFull ? static_cast<int>(std::ceil(p.totalLaps / p.lapsOnFull - 1e-6)) - 1 : 0;
+  if (p.stops == 0) {
+    p.spareLaps = p.lapsOnFull - p.totalLaps;
+    if (p.fuelPerLap > 0) p.fillFuel = std::fmin(p.fuelCap > 0 ? p.fuelCap : 1e9, need * p.fuelPerLap);
+    if (p.energyPerLap > 0) p.fillEnergy = std::fmin(1.0, need * p.energyPerLap);
+    return;
+  }
+  p.fillFuel = p.fuelCap;
+  p.fillEnergy = p.energyPerLap > 0 ? 1.0 : 0.0;
+  const double perStop = (need - p.lapsOnFull) / p.stops; // laps each stop has to add
+  if (p.fuelPerLap > 0) p.addFuel = p.fuelCap > 0 ? std::fmin(p.fuelCap, perStop * p.fuelPerLap) : perStop * p.fuelPerLap;
+  if (p.energyPerLap > 0) p.addEnergy = std::fmin(1.0, perStop * p.energyPerLap);
+  p.stopLap = std::max(1, static_cast<int>(std::floor(p.lapsOnFull)));
+}
+
+void Model::UpdateRaceInfo() {
   race = RaceInfo{};
   if (!connected || !player || trackLength <= 0) return;
   const Snapshot& s = *snap;

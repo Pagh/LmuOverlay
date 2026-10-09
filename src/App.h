@@ -38,6 +38,7 @@ public:
 
   bool LiveConnected() const { return liveModel_.connected; }
   bool LiveOnTrack() const { return liveModel_.onTrack; }
+  const RacePlan& LivePlan() const { return liveModel_.plan; }
   SessionKind LiveSession() const { return liveSession_; }
   std::string OverlayMonitor() const { return monitorDevice_; }
 
@@ -72,6 +73,8 @@ private:
   void ApplyWheelBindings();
   void OnWheelAction(WheelAction a);
   void LogSession(double now);    // session / lap / perf lines in logs\overlay.log
+  void LogTyres(const Model& m);
+  void TrackTyreMax(const TelemInfoV01& t);
 
   HINSTANCE inst_ = nullptr;
   bool demoOnly_ = false;
@@ -116,6 +119,7 @@ private:
   long loggedSession_ = -1;
   std::string loggedTrack_;
   int loggedLaps_ = -1;
+  double tyreMaxSurface_[4] = {-300, -300, -300, -300}, tyreMaxInner_[4] = {-300, -300, -300, -300};
   double perfLogAt_ = 0, perfRenderSum_ = 0, perfRenderMax_ = 0, perfRedraws_ = 0, perfSnaps_ = 0;
   float perfHoldMax_ = 0;
   int perfSeconds_ = 0;
@@ -125,7 +129,7 @@ private:
 
   Overlay overlay_;
   SettingsWindow settingsWindow_;
-  bool preview_ = true;
+  bool preview_ = false;           // off at start: demo widgets only when ticked in the settings window
   std::string monitorDevice_;
   double nextMonitorCheck_ = 0;
   NOTIFYICONDATAW tray_{sizeof(NOTIFYICONDATAW)};

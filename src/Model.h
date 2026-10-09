@@ -58,6 +58,33 @@ struct RaceInfo {
   double spareLaps = 0;         // no stop needed: laps of fuel left over at the flag
 };
 
+// The race you're preparing for, set in Settings > General (practice and qualifying don't say).
+struct RacePlanSettings {
+  bool enabled = true;
+  bool byLaps = false;          // else timed
+  int minutes = 60;
+  int laps = 25;
+};
+
+// Strategy for that planned race, from your pace and fuel / energy use in this session.
+struct RacePlan {
+  bool valid = false;           // outside races, with a plan set
+  bool byLaps = false;
+  int minutes = 0;
+  bool ready = false;           // pace and use per lap known
+  double totalLaps = 0;         // laps you'll complete
+  double pace = 0;
+  bool usesEnergy = false;
+  double fuelPerLap = 0, energyPerLap = 0, fuelCap = 0;
+  double lapsOnFull = -1;
+  bool energyLimited = false;
+  int stops = 0;
+  double fillFuel = 0, fillEnergy = 0; // to start with
+  double addFuel = 0, addEnergy = 0;   // at each stop
+  int stopLap = 0;              // latest lap for the first stop
+  double spareLaps = 0;         // no stop: laps left over at the flag
+};
+
 // Values derived from the latest snapshot, shared by all widgets.
 // Updated once per overlay tick on the render thread.
 struct Model {
@@ -85,6 +112,8 @@ struct Model {
   double noticeAt = -100;                        // NowSeconds() when it was set
 
   RaceInfo race;                                 // see UpdateRace()
+  RacePlanSettings planCfg;                      // set by the app from settings.ini
+  RacePlan plan;                                 // filled by UpdateRace() outside races
 
   void Update(const Snapshot& s, double nowSeconds);
   // A car's lap distance right now: LMU's scoring data is ~6 Hz, so move it on by its speed
@@ -97,6 +126,9 @@ struct Model {
   static double Fraction(float v) { return v > 1.5f ? v / 100.0 : v; }
 
 private:
+  void UpdateRaceInfo();
+  void UpdatePlan();
+
   long lastSession_ = -1;
   char lastTrack_[64] = "";
   char lastCar_[30] = "";

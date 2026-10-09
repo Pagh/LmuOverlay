@@ -62,10 +62,16 @@ bool SharedMemoryReader::CopyFrame(Snapshot& s) {
   const int idx = tel.playerVehicleIdx;
   s.hasPlayerTelem = tel.playerHasVehicle && idx < active;
   if (s.hasPlayerTelem) std::memcpy(&s.telem, &tel.telemInfo[idx], sizeof(TelemInfoV01));
-  for (int k = 0; k < active; ++k) { // 58 bytes per car
-    s.models[k].id = tel.telemInfo[k].mID;
-    std::memcpy(s.models[k].name, tel.telemInfo[k].mVehicleModel, sizeof(s.models[k].name));
-    s.models[k].pos = tel.telemInfo[k].mPos;
+  for (int k = 0; k < active; ++k) { // ~110 bytes per car
+    const TelemInfoV01& ti = tel.telemInfo[k];
+    Snapshot::CarModel& cm = s.models[k];
+    cm.id = ti.mID;
+    std::memcpy(cm.name, ti.mVehicleModel, sizeof(cm.name));
+    cm.pos = ti.mPos;
+    cm.virtualEnergy = ti.mVirtualEnergy;
+    std::memcpy(cm.tyreF, ti.mFrontTireCompoundName, sizeof(cm.tyreF));
+    std::memcpy(cm.tyreR, ti.mRearTireCompoundName, sizeof(cm.tyreR));
+    for (int w = 0; w < 4; ++w) cm.wear[w] = ti.mWheel[w].mWear;
   }
   s.numModels = active;
   // ---- end critical section ----
