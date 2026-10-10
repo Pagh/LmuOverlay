@@ -15,8 +15,9 @@ class Overlay {
 public:
   using MessageHook = std::function<bool(HWND, UINT, WPARAM, LPARAM, LRESULT&)>;
   using MoveCallback = std::function<void(const char* section, int x, int y)>;
+  using ScaleCallback = std::function<void(const char* section, float scale)>;
 
-  bool Create(HINSTANCE inst, const GeneralSettings& gs, MessageHook hook, MoveCallback onMoved);
+  bool Create(HINSTANCE inst, const GeneralSettings& gs, MessageHook hook, MoveCallback onMoved, ScaleCallback onScaled);
   void Destroy();
 
   void SetWidgets(WidgetList widgets);   // replaces the current set (profile change / option edit)
@@ -52,6 +53,8 @@ private:
   POINT ClampToMonitor(const Widget& w, int x, int y) const; // keeps at least 40 px of the widget visible
   void ApplyPositions();                                     // re-clamps every visual (monitor change)
   bool DrawWidget(Slot& s);
+  bool ResizeSlot(Slot& s);                                  // new surface after a scale change
+  Slot* HitTest(POINT pt, bool* corner);                     // topmost widget under pt (edit mode)
   void SetVisible(bool v);
   void UpdateBackdrop();
 
@@ -61,6 +64,7 @@ private:
   WidgetList widgets_;
   MessageHook hook_;
   MoveCallback onMoved_;
+  ScaleCallback onScaled_;
 
   ComPtr<ID3D11Device> d3d_;
   ComPtr<ID2D1Factory1> d2dFactory_;
@@ -81,7 +85,8 @@ private:
   bool userHidden_ = false;
   bool visible_ = false;
 
-  // Edit-mode dragging.
+  // Edit-mode dragging: moves the widget, or resizes it when grabbed by its bottom-right corner.
   Slot* drag_ = nullptr;
+  bool resizing_ = false;
   POINT dragOffset_{};
 };

@@ -45,6 +45,7 @@ public:
   void SetPos(int x, int y) { x_ = x; y_ = y; }
   double Interval() const { return interval_; }
   float Scale() const { return scale_; }
+  void SetScale(float s) { scale_ = s; }
   D2D1_COLOR_F Background() const { return bg_; }
 
   virtual float Width() const = 0;   // unscaled pixels
@@ -83,7 +84,7 @@ extern PerfStats g_perf;
 // Widget type descriptors, one per widget file.
 extern const WidgetType kRelativeWidget, kStandingsWidget, kDeltaWidget, kSectorsWidget, kFuelWidget, kInputsWidget,
     kTyresWidget, kDamageWidget, kPerfWidget, kTrackInfoWidget, kTrackMapWidget, kRadarWidget, kClassWarnWidget,
-    kStrategyWidget;
+    kStrategyWidget, kAidsWidget, kLapHistoryWidget;
 
 // Contextual widgets draw nothing while they have nothing to say; in edit mode (and the
 // settings preview) they show this labelled box instead, so they can still be positioned.

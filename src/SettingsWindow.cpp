@@ -127,6 +127,7 @@ void SettingsWindow::Open(App& app, HINSTANCE inst) {
   app_ = &app;
   closeRequested_ = false;
   lastActive_ = 0;
+  autostart_ = -1;
 
   WNDCLASSEXW wc{sizeof(wc)};
   wc.style = CS_CLASSDC;
@@ -658,6 +659,14 @@ void SettingsWindow::DrawGeneralTab() {
   ImGui::EndDisabled();
 
   ImGui::SeparatorText("Startup");
+  {
+    // Lives in the registry, not settings.ini: read it once per window opening.
+    if (autostart_ < 0) autostart_ = StartWithWindows() ? 1 : 0;
+    bool on = autostart_ == 1;
+    if (ImGui::Checkbox("Start with Windows", &on) && SetStartWithWindows(on)) autostart_ = on ? 1 : 0;
+    ImGui::SameLine();
+    ImGui::TextDisabled("(waits in the tray, shows up when LMU runs)");
+  }
   changed |= ImGui::Checkbox("Open this window when the overlay starts", &gs.openSettingsOnStart);
   changed |= ImGui::Checkbox("Show a tip notification at startup (when this window doesn't open)", &gs.startupTip);
 

@@ -29,17 +29,19 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int) {
     return 0;
   }
 
-  bool demo = false;
+  bool demo = false, autostart = false;
   int argc = 0;
   wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-  for (int i = 1; i < argc; ++i)
+  for (int i = 1; i < argc; ++i) {
     if (wcscmp(argv[i], L"--demo") == 0) demo = true;
+    if (wcscmp(argv[i], L"--autostart") == 0) autostart = true; // started with Windows: stay in the tray
+  }
   LocalFree(argv);
 
   int rc = 0;
   {
     auto app = std::make_unique<App>(); // large object: keep it off the stack
-    rc = app->Run(inst, demo);
+    rc = app->Run(inst, demo, autostart);
   }
   if (mutex) { ReleaseMutex(mutex); CloseHandle(mutex); }
   return rc;

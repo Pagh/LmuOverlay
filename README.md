@@ -50,10 +50,12 @@ build.bat -DLMU_SDK_DIR="X:/path/Le Mans Ultimate/Support/SharedMemoryInterface"
 
 - `bin\LmuOverlay.exe` reads the live game. Start it before or after LMU. Starting it again while it's running opens its settings window.
 - `bin\LmuOverlay.exe --demo` runs a synthetic race, for layout and testing without the game.
+- Settings > General > Startup > **Start with Windows** adds a Run entry for your user (`--autostart`): the overlay
+  starts quietly in the tray (no settings window, no tip), waits for LMU and shows up when you drive.
 
 | Hotkey | Action |
 |---|---|
-| Ctrl+Alt+E | Move widgets (drag them; positions are saved) |
+| Ctrl+Alt+E | Move / resize widgets (drag them, or drag the bottom-right corner; saved) |
 | Ctrl+Alt+O | Show / hide overlay |
 | Ctrl+Alt+D | Switch the delta reference: your best (LMU) → session best → all-time best → lobby fastest lap → last lap |
 | Ctrl+Alt+P | Next profile (until the session type changes) |
@@ -106,11 +108,16 @@ monitor's top-left corner and are always clamped onto it, so a widget can't be l
 | classwarn | Red pill when a faster class is closing in behind you ("HYPERCAR 1.8 s behind") |
 | radar | Side bars while a car is alongside (CAR LEFT / RIGHT / 3-WIDE) |
 | inputs | RPM / shift light, gear, speed, TC / cut / slip / ABS / map, brake bias, water / oil (or battery), throttle / brake trace of the last 12 s with lock-ups and wheel spin marked |
+| aids | TC and ABS activity: the label lights up while the aid works (`mTCActive` / `mABSActive`), a strip shows when it worked over the last 5 s; optional count per lap |
 | tyres | Inner-layer (or surface / carcass) temperature with L/C/R strip, coloured against the compound's optimal temperature, pressure, tread left, brake temperature; optional READY TO PUSH badge |
 | strategy | Races: pit stop required → fuel / energy, laps to the end, pit window, what to add, stop time; otherwise a one-line fuel check. Practice / qualifying: plan for the race set in Settings > General > Race plan (time or laps) |
 | damage | After a hit: car silhouette with the hit zones, aero and suspension damage %, repair time, lap time lost; for a few seconds after any contact ("CONTACT · NO DAMAGE"), with the session's contact count |
+| laps | Lap history: your last laps with time (invalid struck through), gap to your session best, fuel / energy / tyre tread used; top row = lap in progress, fuel / energy used so far minus your last clean lap's at the same point |
 | fuel | Detailed fuel / energy table (off by default; Strategy covers it) |
 | perf | The overlay's own cost (off by default) |
+
+Other cars' tyre tread: online LMU doesn't send it (every car reads 100 %), so the tread figure is only shown
+when at least one other car reports some wear; the compound letters are always shown.
 
 Timing colours everywhere: **purple** = fastest in your class this session, **green** = that driver's own best, yellow = slower (sectors widget).
 
@@ -166,12 +173,13 @@ tools/LmuProbe.cpp         console diagnostic
 Adding a widget: create `widgets/FooWidget.cpp` with its `kOptions` list and a `WidgetType`,
 then add it to `Registry.cpp` and `CMakeLists.txt`. The settings window picks it up automatically.
 
-## Moving widgets
+## Moving and resizing widgets
 
 Press **Ctrl+Alt+E** (or "Move widgets" in the settings window / tray menu). The screen dims, every enabled widget
 is shown with a yellow outline even if the game isn't running, and you can drag them with
-the mouse. Positions snap to a 4 px grid and are saved to the ini as you drop them. Press
-Ctrl+Alt+E again to finish. In-game, open a menu or pause first so LMU releases the mouse cursor.
+the mouse. Positions snap to a 4 px grid and are saved to the ini as you drop them. Drag a widget's
+bottom-right corner (the yellow dots) to resize it: it scales in 5 % steps (50–300 %), same as the
+widget's Scale option. Press Ctrl+Alt+E again to finish. In-game, open a menu or pause first so LMU releases the mouse cursor.
 
 ## Diagnostics
 
@@ -190,4 +198,5 @@ boundaries; `LmuProbe map` (15 s) checks the world's handedness from the track o
 - Verified: car frame is x = left, y = up, z = back (left-handed world; maps draw x right, z up); `mSectorFlag` is 11 = green,
   1 = yellow, index i = sector i+1; before a race starts `mEndET` is invalid and `mSessionTimeRemaining` holds the countdown;
   track limits = `mTrackLimitsSteps` / `mTrackLimitsStepsPerPoint` (penalty at `StepsPerPenalty`).
+- To verify on track: `mTCActive` / `mABSActive` timing (aids widget); other cars' `mWear` online (assumed not sent).
 - To verify on track: `mVirtualEnergy` units (handled as a fraction 0–1 or as a percentage).

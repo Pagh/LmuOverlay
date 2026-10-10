@@ -29,6 +29,10 @@ Indice
 
 Puoi avviarlo prima o dopo LMU. Se lo avvii di nuovo mentre è già aperto, si apre la finestra Impostazioni.
 
+**Avvio automatico.** Impostazioni → **General** → **Startup** → **Start with Windows**: l'overlay parte
+con Windows, resta in silenzio vicino all'orologio (niente finestra, niente notifica) e compare da solo
+quando apri LMU e vai in pista. Mentre LMU è chiuso controlla solo ogni tanto se è partito: non pesa.
+
 **Aggiornamenti.** All'avvio l'overlay controlla se c'è una versione nuova e, se c'è, mostra una notifica
 vicino all'orologio. Per installarla: Impostazioni → **General** → **Updates** → **Update now**. L'exe
 viene sostituito e riavviato da solo; impostazioni, profili e record restano.
@@ -39,7 +43,7 @@ viene sostituito e riavviato da solo; impostazioni, profili e record restano.
 
 | Tasti | Cosa fa |
 |---|---|
-| Ctrl+Alt+E | Sposta i widget (trascinali col mouse; la posizione si salva da sola). Premi di nuovo per finire |
+| Ctrl+Alt+E | Sposta e ridimensiona i widget (trascinali, o trascina l'angolo in basso a destra; si salva da solo). Premi di nuovo per finire |
 | Ctrl+Alt+O | Mostra / nascondi l'overlay |
 | Ctrl+Alt+D | Cambia il giro di riferimento del delta: tuo best (LMU) → best della sessione → best di sempre → giro più veloce della lobby → ultimo giro |
 | Ctrl+Alt+P | Passa al profilo successivo (finché non cambia il tipo di sessione) |
@@ -50,7 +54,9 @@ Sposta widget, Mostra overlay, Ricarica impostazioni, Esci).
 
 **Spostare i widget.** Premi Ctrl+Alt+E: lo schermo si scurisce e tutti i widget attivi compaiono con un
 bordo giallo, anche quelli che normalmente appaiono solo in certe situazioni. Trascinali dove vuoi; si
-agganciano a una griglia di 4 px. In gioco, apri prima un menu o metti in pausa così LMU libera il mouse.
+agganciano a una griglia di 4 px. Per **cambiare la dimensione** trascina l'angolo in basso a destra (i
+puntini gialli): il widget si ingrandisce o rimpicciolisce a passi del 5 % (dal 50 al 300 %), come l'opzione
+*Scale*. In gioco, apri prima un menu o metti in pausa così LMU libera il mouse.
 
 **Monitor.** L'overlay segue automaticamente il monitor su cui c'è LMU. Le posizioni predefinite sono
 pensate per 1920×1080: su risoluzioni diverse sposta i widget o usa **Global scale** (General).
@@ -115,7 +121,8 @@ mettere, calcolata per la gara più un giro di margine). Così sai sempre quanto
 Sotto, la tua classe: i primi della classe più le macchine intorno a te, con numero, marca, miglior giro,
 ultimo giro, distacco, **carburante ed energia virtuale** rimasti (`62  48%`: carburante a sinistra, energia
 in blu a destra) e **gomme** (mescola S / M / H / W, anteriore e posteriore se diverse, e battistrada
-rimasto). In gara il distacco è il tempo in pista; in prova e qualifica è la differenza tra i migliori giri.
+rimasto). Online LMU non manda l'usura delle gomme degli altri (risulterebbero tutti al 100 %): in quel caso
+il battistrada non viene mostrato, resta solo la mescola. In gara il distacco è il tempo in pista; in prova e qualifica è la differenza tra i migliori giri.
 
 | Opzione | Cosa fa |
 |---|---|
@@ -259,6 +266,19 @@ Due barre laterali che si accendono quando hai una macchina affiancata: `CAR LEF
 | Shift light: yellow / red / shift now | A che frazione del limitatore si accende la luce |
 | Water / Oil hot above (105 / 125 °C) | Soglie di allarme |
 
+### TC / ABS (intervento aiuti)
+
+Due righe, **TC** e **ABS**, con il livello impostato. L'etichetta si **accende** (gialla per il TC, blu per
+l'ABS) mentre l'aiuto sta intervenendo; la striscia accanto mostra **quando** è intervenuto negli ultimi
+5 secondi (il più recente a destra), così capisci in quale uscita di curva o frenata è entrato.
+
+| Opzione | Cosa fa |
+|---|---|
+| Width (300 px) | Larghezza |
+| Strip length (5 s) | Quanti secondi copre la striscia |
+| Count activations this lap (spento) | Quante volte è intervenuto in questo giro, a destra |
+| TC working / ABS working | Colori |
+
 ### Tyres & brakes (gomme e freni)
 
 Per ogni gomma: temperatura (con sinistra / centro / destra), pressione, battistrada rimasto e
@@ -325,6 +345,24 @@ fatto danni. In basso conta i contatti della sessione.
 | Show when there's no damage (spento) | Sempre visibile |
 | Show after a contact (acceso) / Contact shown for (6 s) | Compare dopo un tocco e per quanto |
 | Ignore contacts weaker than (20) | Ignora i colpetti (cordoli, sfioramenti) |
+
+### Lap history (storico giri)
+
+I tuoi ultimi giri: numero (con **P** se sei passato ai box), **tempo** (viola il tuo migliore, barrato se
+invalidato), distacco dal tuo **best della sessione**, e quanto ha consumato ogni giro: **carburante** (litri),
+**energia virtuale** (%) e **gomme** (battistrada consumato nel giro, media delle quattro). *refuel* /
+*refill* / *new* = hai fatto rifornimento o cambiato gomme durante il giro.
+
+La riga in alto è il **giro in corso**: quanto carburante ed energia hai usato finora **rispetto all'ultimo
+giro pulito nello stesso punto della pista**. Verde (es. `-0.04`) = stai consumando meno, giallo = di più.
+Compare dopo il primo giro pulito e dal 3 % del giro in poi.
+
+| Opzione | Cosa fa |
+|---|---|
+| Laps shown (5) | Quanti giri elencare (fino a 10) |
+| Lap in progress vs last lap | La riga del giro in corso |
+| Gap to your session best / Fuel used / Virtual energy used / Tyre wear per lap | Le colonne |
+| Using less / more than last lap | Colori del confronto |
 
 ### Fuel / Energy (carburante, spento di default)
 

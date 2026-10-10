@@ -80,6 +80,7 @@ bool SharedMemoryReader::CopyFrame(Snapshot& s) {
   const double t2 = NowSeconds();
 
   s.numVehicles = n;
+  s.DetectOthersWear(s.hasPlayerTelem ? s.telem.mID : -1);
   s.scoring.mVehicle = nullptr;       // pointers into the game's address space
   s.scoring.mResultsStream = nullptr;
   s.copyTime = t2;

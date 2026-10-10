@@ -42,6 +42,15 @@ struct Snapshot {
     const CarModel* c = CarFor(id);
     return c ? c->name : nullptr;
   }
+  // Online, LMU doesn't send other cars' tyre wear: they all read as new (1.0) the whole race.
+  // Only trust it when at least one other car shows some wear.
+  bool othersWear = false;
+  void DetectOthersWear(long playerId) {
+    othersWear = false;
+    for (int i = 0; i < numModels && !othersWear; ++i)
+      if (models[i].id != playerId)
+        for (double w : models[i].wear) if (w > 0.0 && w < 0.999) { othersWear = true; break; }
+  }
 
   // Reader diagnostics (how long we held the game's lock).
   float lockWaitUs = 0.f;

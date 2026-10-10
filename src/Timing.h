@@ -52,6 +52,7 @@ public:
   // Player
   const SectorSet& PlayerLast() const { return playerLast_; }
   bool PlayerLastValid() const { return playerLastValid_; }
+  int PlayerLapSerial() const { return playerLapSerial_; } // increments with every lap time you set
   const SectorSet& PlayerSession() const { return playerSession_; }
   const SectorSet& PlayerAllTime() const { return allTime_; }
   bool CurrentLapInvalid() const { return curLapInvalid_; }
@@ -112,6 +113,7 @@ private:
 
   SectorSet playerLast_, playerSession_, allTime_;
   bool playerLastValid_ = true;
+  int playerLapSerial_ = 0;     // never reset
   long lapNumber_ = -1;
   bool curLapInvalid_ = false, prevLapInvalid_ = false;
   double lapChangeTime_ = -100; // telemetry time of the last lap-number change

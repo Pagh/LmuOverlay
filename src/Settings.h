@@ -44,6 +44,11 @@ struct GeneralSettings {
   void Save(IniDoc& doc) const;
 };
 
+// "Start with Windows": a Run entry for the current user that starts the overlay quietly in the
+// tray (--autostart); it then waits for LMU and shows itself when you drive.
+bool StartWithWindows();          // the entry exists and points at this exe
+bool SetStartWithWindows(bool on);
+
 struct MonitorInfo {
   std::string device;  // \\.\DISPLAYn
   RECT rect;

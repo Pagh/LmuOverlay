@@ -158,3 +158,32 @@ void ProfileManager::Normalize(IniDoc& doc) {
     for (const OptionDef& d : FullSchema(t))
       if (!doc.Find(t.id, d.key)) SetOptionValue(doc, t.id, d, d.def);
 }
+
+namespace {
+constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr wchar_t kRunValue[] = L"LmuOverlay";
+
+std::wstring AutostartCommand() {
+  wchar_t path[MAX_PATH];
+  GetModuleFileNameW(nullptr, path, MAX_PATH);
+  return L"\"" + std::wstring(path) + L"\" --autostart";
+}
+} // namespace
+
+bool StartWithWindows() {
+  wchar_t buf[MAX_PATH + 32];
+  DWORD size = sizeof(buf);
+  if (RegGetValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, RRF_RT_REG_SZ, nullptr, buf, &size) != ERROR_SUCCESS)
+    return false;
+  return _wcsicmp(buf, AutostartCommand().c_str()) == 0; // stale if the folder was moved
+}
+
+bool SetStartWithWindows(bool on) {
+  if (!on) {
+    const LSTATUS r = RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, kRunValue);
+    return r == ERROR_SUCCESS || r == ERROR_FILE_NOT_FOUND;
+  }
+  const std::wstring cmd = AutostartCommand();
+  return RegSetKeyValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, REG_SZ, cmd.c_str(),
+                         static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
+}

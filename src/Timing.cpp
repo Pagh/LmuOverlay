@@ -383,6 +383,7 @@ void Timing::Update(const Snapshot& s, int playerIdx) {
 void Timing::OnPlayerLap(const SectorSet& lap, bool valid, bool damaged) {
   playerLast_ = lap;
   playerLastValid_ = valid;
+  ++playerLapSerial_;
   if (!valid) { lapHadDamageChange_ = false; return; }
   playerSession_.TakeBest(lap);
   if (lap.lap > 0 && lap.lap < playerSession_.lap * 1.07) { // not pit / traffic / incident laps

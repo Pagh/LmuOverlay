@@ -205,8 +205,9 @@ void DemoSource::Fill(Snapshot& s, double t) {
   tm.mDeltaBest = 0.6 * std::sin(t * 0.08);
   tm.mTC = 4; tm.mTCMax = 11; tm.mTCCut = 3; tm.mTCCutMax = 11; tm.mTCSlip = 5; tm.mTCSlipMax = 11;
   tm.mABS = 6; tm.mABSMax = 11; tm.mMotorMap = 2; tm.mMotorMapMax = 5;
-  tm.mTCActive = throttle > 0.9 && phase > 0.9;
-  tm.mABSActive = braking && phase < 0.8;
+  // Short bursts: TC on corner exit, ABS at the start of braking.
+  tm.mTCActive = phase > 0.89 && phase < 0.97 && std::fmod(t * 7.0, 1.0) < 0.6;
+  tm.mABSActive = braking && phase < 0.8 && std::fmod(t * 9.0, 1.0) < 0.5;
   tm.mRearBrakeBias = 0.455;
   tm.mDentSeverity[0] = 1; // front
   tm.mDentSeverity[7] = 2; // front-right
@@ -223,4 +224,5 @@ void DemoSource::Fill(Snapshot& s, double t) {
     wh.mWear = 1.0 - std::fmod(t, 3000.0) / 3000.0 * (w < 2 ? 0.30 : 0.24);
     wh.mBrakeTemp = 273.15 + 450.0 + (braking ? 250.0 : 0.0) + w * 10.0; // Kelvin, like the game
   }
+  s.DetectOthersWear(kPlayer);
 }

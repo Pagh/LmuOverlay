@@ -4,23 +4,54 @@
 #include "Timing.h"
 #include <cstdint>
 
-// Tracks per-lap usage of a depleting quantity (fuel litres, virtual energy fraction).
+// Tracks per-lap usage of a depleting quantity (fuel litres, virtual energy fraction, tyre wear).
 class ConsumptionTracker {
 public:
-  void Update(int lapNumber, double amount, bool inPits);
+  // lapFrac: how far round the lap you are (0..1), for the same-point comparison with the last lap.
+  void Update(int lapNumber, double amount, bool inPits, double lapFrac);
   void Reset();
 
   double PerLap() const;        // average of recent clean laps, or <= 0 if unknown
   double CurrentLapUsed() const { return lapStart_ >= 0 ? lapStart_ - last_ : 0.0; }
 
+  // The last lap that ended (counted even if pitted): how much it used and whether it was clean.
+  int Closed() const { return closed_; }        // increments on every lap change
+  double LastLapUsed() const { return lastUsed_; }
+  bool LastLapClean() const { return lastClean_; }
+  bool LastLapPartial() const { return lastPartial_; } // joined mid-lap: its use means nothing
+  // This lap's use so far minus the last clean lap's use at the same point of the lap.
+  bool VsLastLap(double lapFrac, double& delta) const;
+
 private:
   static constexpr int kHistory = 5;
+  static constexpr int kPoints = 100;  // use recorded every 1 % of the lap
   int lap_ = -1;
   double lapStart_ = -1.0;
   double last_ = 0.0;
   bool dirtyLap_ = true;        // pitted / refuelled / joined mid-lap: don't count it
   double history_[kHistory]{};
   int count_ = 0, next_ = 0;
+  int closed_ = 0;
+  double lastUsed_ = 0.0;
+  bool lastClean_ = false;
+  bool partial_ = true, lastPartial_ = true;
+  // Use so far at each 1 % of the lap: this lap and the last clean one.
+  float cur_[kPoints + 1]{}, ref_[kPoints + 1]{};
+  int curTop_ = -1, refTop_ = -1;
+  bool wrapped_ = false;        // lap distance has wrapped to the new lap (scoring lags telemetry)
+};
+
+// One of your completed laps, for the lap history widget.
+struct LapRecord {
+  int lap = 0;                  // lap number (completed laps count)
+  double time = 0;              // s, <= 0 unknown
+  bool valid = true;
+  bool pit = false;             // went through the pit lane
+  bool hasUse = false;          // fuel and wear known
+  bool hasEnergy = false;       // energy known (cars with virtual energy)
+  double fuel = 0;              // litres used (negative: refuelled)
+  double energy = 0;            // virtual energy used, fraction (negative: refilled)
+  double wear = 0;              // tread used, average of the four, fraction (negative: new tyres)
 };
 
 // Race length and fuel / energy planning, shared by the session header and the strategy widget.
@@ -103,6 +134,13 @@ struct Model {
 
   ConsumptionTracker fuel;
   ConsumptionTracker energy;                     // virtual energy, as fraction 0..1
+  ConsumptionTracker wear;                       // average tread left of the four tyres, 1 = new
+  double lapFrac = 0;                            // how far round the lap the player is (0..1)
+
+  // Your last laps this session, newest first (filled by UpdateRace()).
+  static constexpr int kLapHistory = 10;
+  LapRecord laps[kLapHistory];
+  int lapCount = 0;
 
   const Timing* timing = nullptr;                // sector / lap bookkeeping (set by the app)
   const RestData* rest = nullptr;                // damage details from LMU's REST API (may be !valid)
@@ -128,6 +166,7 @@ struct Model {
 private:
   void UpdateRaceInfo();
   void UpdatePlan();
+  void UpdateLapHistory();
 
   long lastSession_ = -1;
   char lastTrack_[64] = "";
@@ -135,4 +174,9 @@ private:
   double maxTimeLeft_ = 0;
   bool sawPreStart_ = false;
   double lastET_ = 0.0;
+  // Lap history: the lap time (scoring) and the lap's use (telemetry) arrive at slightly different times.
+  int seenLapSerial_ = 0, seenClosed_ = 0;
+  double closedAt_ = -100, timeAt_ = -100;
+  bool lapInPits_ = false;
+  LapRecord closedLap_, timedLap_;
 };

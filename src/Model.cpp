@@ -5,11 +5,13 @@
 
 void ConsumptionTracker::Reset() { *this = ConsumptionTracker{}; }
 
-void ConsumptionTracker::Update(int lapNumber, double amount, bool inPits) {
+void ConsumptionTracker::Update(int lapNumber, double amount, bool inPits, double lapFrac) {
   if (lap_ < 0 || lapNumber < lap_) { // first sample or session restart
     lap_ = lapNumber;
     lapStart_ = last_ = amount;
     dirtyLap_ = true;
+    partial_ = true;
+    curTop_ = -1;
     return;
   }
   if (amount > last_ + 1e-3) dirtyLap_ = true; // refuelled / energy restored
@@ -17,16 +19,48 @@ void ConsumptionTracker::Update(int lapNumber, double amount, bool inPits) {
 
   if (lapNumber != lap_) {
     const double used = lapStart_ - amount;
-    if (lapNumber == lap_ + 1 && !dirtyLap_ && used > 0.0) {
+    const bool clean = lapNumber == lap_ + 1 && !dirtyLap_ && used > 0.0;
+    if (clean) {
       history_[next_] = used;
       next_ = (next_ + 1) % kHistory;
       if (count_ < kHistory) ++count_;
     }
+    ++closed_;
+    lastUsed_ = used;
+    lastClean_ = clean;
+    lastPartial_ = partial_ || lapNumber != lap_ + 1;
+    partial_ = false;
+    // A clean lap recorded (almost) all the way round becomes the same-point reference.
+    if (clean && curTop_ >= kPoints - 5) {
+      while (curTop_ < kPoints) cur_[++curTop_] = static_cast<float>(used);
+      std::memcpy(ref_, cur_, sizeof(ref_));
+      refTop_ = kPoints;
+    }
     lap_ = lapNumber;
     lapStart_ = amount;
     dirtyLap_ = inPits;
+    curTop_ = 0;
+    cur_[0] = 0.f;
+    wrapped_ = false;
   }
   last_ = amount;
+
+  // Use so far at every 1 % of the lap. Scoring's lap distance wraps a moment after telemetry's
+  // lap counter moves on: ignore the old lap's end until it does.
+  if (lapFrac < 0.5) wrapped_ = true;
+  if (wrapped_ && curTop_ >= 0) {
+    const int k = std::clamp(static_cast<int>(lapFrac * kPoints), 0, kPoints);
+    const float used = static_cast<float>(lapStart_ - amount);
+    while (curTop_ < k) cur_[++curTop_] = used;
+  }
+}
+
+bool ConsumptionTracker::VsLastLap(double lapFrac, double& delta) const {
+  if (refTop_ < kPoints || dirtyLap_ || !wrapped_ || curTop_ < 3) return false; // too early in the lap to say
+  const double x = std::clamp(lapFrac, 0.0, 1.0) * kPoints;
+  const int i = std::min(static_cast<int>(x), kPoints - 1);
+  delta = CurrentLapUsed() - (ref_[i] + (ref_[i + 1] - ref_[i]) * (x - i));
+  return true;
 }
 
 double ConsumptionTracker::PerLap() const {
@@ -69,6 +103,11 @@ void Model::Update(const Snapshot& s, double nowSeconds) {
   if (newPlace || s.scoring.mSession != lastSession_ || s.scoring.mCurrentET + 1.0 < lastET_) {
     fuel.Reset();
     energy.Reset();
+    wear.Reset();
+    lapCount = 0;
+    seenClosed_ = 0;
+    lapInPits_ = false;
+    closedAt_ = timeAt_ = -100;
     maxTimeLeft_ = 0;
     sawPreStart_ = false;
   }
@@ -81,9 +120,15 @@ void Model::Update(const Snapshot& s, double nowSeconds) {
 
   lapsToGo = -1.0; // set by UpdateRace()
 
+  lapFrac = trackLength > 0 ? std::clamp(LiveLapDist(*player) / trackLength, 0.0, 1.0) : 0.0;
   if (telem) {
-    fuel.Update(telem->mLapNumber, telem->mFuel, player->mInPits);
-    if (telem->mVirtualEnergy > 0.f) energy.Update(telem->mLapNumber, Fraction(telem->mVirtualEnergy), player->mInPits);
+    const long lap = telem->mLapNumber;
+    const bool pits = player->mInPits;
+    fuel.Update(lap, telem->mFuel, pits, lapFrac);
+    if (telem->mVirtualEnergy > 0.f) energy.Update(lap, Fraction(telem->mVirtualEnergy), pits, lapFrac);
+    double tread = 0;
+    for (const TelemWheelV01& w : telem->mWheel) tread += w.mWear;
+    wear.Update(lap, tread / 4.0, pits, lapFrac);
   }
 }
 
@@ -108,6 +153,50 @@ double Model::LiveLapDist(const VehicleScoringInfoV01& v) const {
 void Model::UpdateRace() {
   UpdateRaceInfo();
   UpdatePlan();
+  UpdateLapHistory();
+}
+
+// Lap history: the lap's fuel / energy / tyre use is known the moment telemetry's lap counter moves
+// on; its time comes with the next scoring update (or the other way round). Pair them up.
+void Model::UpdateLapHistory() {
+  if (!connected || !player || !timing) return;
+  if (fuel.Closed() != seenClosed_) {
+    seenClosed_ = fuel.Closed();
+    closedAt_ = now;
+    closedLap_ = LapRecord{};
+    closedLap_.pit = lapInPits_;
+    lapInPits_ = false;
+    closedLap_.hasUse = !fuel.LastLapPartial();
+    closedLap_.fuel = fuel.LastLapUsed();
+    closedLap_.wear = wear.LastLapUsed();
+    closedLap_.hasEnergy = race.usesEnergy && energy.Closed() > 0 && !energy.LastLapPartial();
+    closedLap_.energy = energy.LastLapUsed();
+  }
+  if (player->mInPits) lapInPits_ = true;
+  if (timing->PlayerLapSerial() != seenLapSerial_) {
+    seenLapSerial_ = timing->PlayerLapSerial();
+    timeAt_ = now;
+    timedLap_ = LapRecord{};
+    timedLap_.lap = player->mTotalLaps;
+    timedLap_.time = timing->PlayerLast().lap;
+    timedLap_.valid = timing->PlayerLastValid();
+  }
+  if (timeAt_ < 0) return;
+  const bool paired = std::fabs(closedAt_ - timeAt_) < 3.0;
+  if (!paired && now - timeAt_ < 3.0) return; // wait a little for the use figures
+  LapRecord r = timedLap_;
+  if (paired) {
+    r.pit = closedLap_.pit;
+    r.hasUse = closedLap_.hasUse;
+    r.hasEnergy = closedLap_.hasEnergy;
+    r.fuel = closedLap_.fuel;
+    r.energy = closedLap_.energy;
+    r.wear = closedLap_.wear;
+  }
+  for (int i = std::min(lapCount, kLapHistory - 1); i > 0; --i) laps[i] = laps[i - 1];
+  laps[0] = r;
+  lapCount = std::min(lapCount + 1, kLapHistory);
+  timeAt_ = closedAt_ = -100;
 }
 
 // Practice / qualifying: the strategy for the race set in Settings, from this session's pace and use.

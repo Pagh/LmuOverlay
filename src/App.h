@@ -19,7 +19,7 @@
 // All of it runs on the main thread except the data source threads.
 class App {
 public:
-  int Run(HINSTANCE inst, bool demoOnly);
+  int Run(HINSTANCE inst, bool demoOnly, bool autostart = false);
 
   // ---- used by the settings window ----
   GeneralSettings& Settings() { return gs_; }
@@ -61,6 +61,7 @@ private:
   void SaveSettingsNow();
   void ReloadFromDisk();
   void OnWidgetMoved(const char* section, int x, int y);
+  void OnWidgetScaled(const char* section, float scale);
   void CreateTray();
   void ShowTrayMenu(HWND hwnd);
   bool HandleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& result);
@@ -75,9 +76,11 @@ private:
   void LogSession(double now);    // session / lap / perf lines in logs\overlay.log
   void LogTyres(const Model& m);
   void TrackTyreMax(const TelemInfoV01& t);
+  void LogHitches(const Model& m);
 
   HINSTANCE inst_ = nullptr;
   bool demoOnly_ = false;
+  bool autostart_ = false;        // started with Windows: no settings window / tip
   bool running_ = true;
 
   std::wstring exeDir_, settingsPath_;
@@ -119,6 +122,7 @@ private:
   long loggedSession_ = -1;
   std::string loggedTrack_;
   int loggedLaps_ = -1;
+  double hitchET_ = -1, hitchAt_ = 0;
   double tyreMaxSurface_[4] = {-300, -300, -300, -300}, tyreMaxInner_[4] = {-300, -300, -300, -300};
   double perfLogAt_ = 0, perfRenderSum_ = 0, perfRenderMax_ = 0, perfRedraws_ = 0, perfSnaps_ = 0;
   float perfHoldMax_ = 0;

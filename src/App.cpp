@@ -42,14 +42,16 @@ const OptionDef& DeltaRefOption() {
 // ----------------------------------------------------------------------------
 // Startup / shutdown
 
-int App::Run(HINSTANCE inst, bool demoOnly) {
+int App::Run(HINSTANCE inst, bool demoOnly, bool autostart) {
   inst_ = inst;
   demoOnly_ = demoOnly;
+  autostart_ = autostart;
   exeDir_ = ExeDir();
   settingsPath_ = exeDir_ + L"settings.ini";
   profiles_.Init(exeDir_ + L"profiles");
   LogOpen(exeDir_ + L"logs");
-  Logf("---- overlay started v%s (build %s %s)%s", LMU_OVERLAY_VERSION, __DATE__, __TIME__, demoOnly ? " demo" : "");
+  Logf("---- overlay started v%s (build %s %s)%s%s", LMU_OVERLAY_VERSION, __DATE__, __TIME__, demoOnly ? " demo" : "",
+       autostart ? " with Windows" : "");
   Updater::CleanUp();
   LoadOrMigrate();
   ApplyProcessSettings();
@@ -70,7 +72,8 @@ int App::Run(HINSTANCE inst, bool demoOnly) {
 
   auto hook = [this](HWND h, UINT m, WPARAM w, LPARAM l, LRESULT& r) { return HandleMessage(h, m, w, l, r); };
   auto moved = [this](const char* section, int x, int y) { OnWidgetMoved(section, x, y); };
-  if (!overlay_.Create(inst_, gs_, hook, moved)) {
+  auto scaled = [this](const char* section, float scale) { OnWidgetScaled(section, scale); };
+  if (!overlay_.Create(inst_, gs_, hook, moved, scaled)) {
     MessageBoxW(nullptr, L"Could not initialise Direct3D / DirectComposition.", L"LMU Overlay", MB_ICONERROR);
     return 1;
   }
@@ -85,7 +88,7 @@ int App::Run(HINSTANCE inst, bool demoOnly) {
   wheel_.Init(hwnd);
   ApplyWheelBindings();
   CreateTray();
-  if (gs_.openSettingsOnStart) OpenSettings();
+  if (gs_.openSettingsOnStart && !autostart_) OpenSettings();
   if (gs_.updateCheckAtStart && !UpdateRepo().empty()) updater_.Check(UpdateRepo());
 
   PreciseTimer tick;
@@ -240,6 +243,10 @@ void App::Tick(double now) {
     g_acc.renderMax = std::max(g_acc.renderMax, t1 - t0);
     ++g_acc.renderCount;
     g_acc.redraws += drawn;
+    // A draw this slow means the GPU / compositor was blocked: log where, to match it with stutters.
+    if (t1 - t0 > 0.05 && !demoOnly_ && liveModel_.onTrack && liveModel_.player)
+      Logf("slow overlay draw %.0f ms (GPU busy?) at %.0f m, lap %d", (t1 - t0) * 1000.0, liveModel_.player->mLapDist,
+           liveModel_.player->mTotalLaps + 1);
   }
   if (t1 - g_acc.start >= 1.0) {
     const double span = t1 - g_acc.start;
@@ -316,6 +323,7 @@ void App::LogSession(double now) {
       LogTyres(m);
     }
     if (m.telem) TrackTyreMax(*m.telem);
+    if (m.telem && m.onTrack) LogHitches(m);
   }
   // Once a minute: the overlay's own cost.
   if (now - perfLogAt_ >= 60.0) {
@@ -336,6 +344,22 @@ void App::LogSession(double now) {
     perfHoldMax_ = 0;
     perfSeconds_ = 0;
   }
+}
+
+// Game hitches: LMU publishes telemetry ~100 times a second from its main loop. If the game time
+// doesn't move for a while (seen by the reader thread, which copies 50 times a second regardless of
+// the overlay's own drawing) while you're driving, the game itself stalled: log how long and where.
+void App::LogHitches(const Model& m) {
+  const TelemInfoV01& t = *m.telem;
+  const double et = t.mElapsedTime, at = m.snap->copyTime;
+  if (et == hitchET_) return;
+  const double stall = at - hitchAt_;
+  const double speed = std::fabs(t.mLocalVel.z) * 3.6;
+  if (hitchET_ > 0 && et > hitchET_ && et - hitchET_ < 2.0 && stall > 0.06 && speed > 30 && !m.player->mInPits)
+    Logf("game hitch: no new frame for %.0f ms at %.0f m, lap %d, %.0f km/h", stall * 1000.0, m.player->mLapDist,
+         m.player->mTotalLaps + 1, speed);
+  hitchET_ = et;
+  hitchAt_ = at;
 }
 
 static double Avg3(const double* v) { return (v[0] + v[1] + v[2]) / 3.0 - 273.15; }
@@ -534,6 +558,12 @@ void App::OnWidgetMoved(const char* section, int x, int y) {
   lastEdit_ = NowSeconds();
 }
 
+void App::OnWidgetScaled(const char* section, float scale) {
+  profileDoc_.SetFloat(section, "scale", scale);
+  savePending_ = true; // the overlay already resized the widget
+  lastEdit_ = NowSeconds();
+}
+
 void App::SettingsChanged() {
   // Apply right away (cheap); write the file and restart the reader once edits settle.
   ApplyProcessSettings();
@@ -584,7 +614,7 @@ void App::CreateTray() {
   wcscpy_s(tray_.szTip, demoOnly_ ? L"LMU Overlay (demo)" : L"LMU Overlay");
   Shell_NotifyIconW(NIM_ADD, &tray_);
 
-  if (gs_.startupTip && !gs_.openSettingsOnStart) {
+  if (gs_.startupTip && !gs_.openSettingsOnStart && !autostart_) {
     NOTIFYICONDATAW tip = tray_;
     tip.uFlags = NIF_INFO;
     tip.dwInfoFlags = NIIF_INFO | NIIF_NOSOUND;

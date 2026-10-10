@@ -10,10 +10,12 @@ constexpr DWORD kExStyle = WS_EX_NOREDIRECTIONBITMAP | WS_EX_TOPMOST | WS_EX_TOO
                            WS_EX_LAYERED | WS_EX_TRANSPARENT;
 }
 
-bool Overlay::Create(HINSTANCE inst, const GeneralSettings& gs, MessageHook hook, MoveCallback onMoved) {
+bool Overlay::Create(HINSTANCE inst, const GeneralSettings& gs, MessageHook hook, MoveCallback onMoved,
+                     ScaleCallback onScaled) {
   gs_ = gs;
   hook_ = std::move(hook);
   onMoved_ = std::move(onMoved);
+  onScaled_ = std::move(onScaled);
   visible_ = editMode_ = false;
   drag_ = nullptr;
 
@@ -173,11 +175,46 @@ bool Overlay::DrawWidget(Slot& s) {
   dc->Clear(D2D1::ColorF(0, 0, 0, 0));
   painter_.Begin(dc.Get(), off, scale, s.widget->Background(), editMode_);
   s.widget->Draw(painter_);
+  if (editMode_) { // resize grip: a triangle of dots in the bottom-right corner, constant size on screen
+    const float u = 1.f / scale, w0 = s.widget->Width(), h0 = s.widget->Height();
+    for (int a = 0; a < 3; ++a)
+      for (int b = 0; a + b < 3; ++b)
+        painter_.Fill(w0 - (6 + 5 * a) * u, h0 - (6 + 5 * b) * u, 3 * u, 3 * u, Col::EditOutline);
+  }
   painter_.End();
   dc->PopAxisAlignedClip();
   hr = s.surface->EndDraw();
   if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) deviceLost_ = true;
   return SUCCEEDED(hr);
+}
+
+bool Overlay::ResizeSlot(Slot& s) {
+  const Widget& w = *s.widget;
+  const UINT pw = std::max(1u, static_cast<UINT>(std::ceil(w.Width() * ScaleOf(w))));
+  const UINT ph = std::max(1u, static_cast<UINT>(std::ceil(w.Height() * ScaleOf(w))));
+  ComPtr<IDCompositionSurface> surface;
+  if (FAILED(dcomp_->CreateSurface(pw, ph, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_ALPHA_MODE_PREMULTIPLIED, &surface)))
+    return false;
+  s.surface = surface;
+  s.visual->SetContent(s.surface.Get());
+  const POINT p = ClampToMonitor(w, w.X(), w.Y());
+  s.visual->SetOffsetX(static_cast<float>(p.x));
+  s.visual->SetOffsetY(static_cast<float>(p.y));
+  DrawWidget(s);
+  return SUCCEEDED(dcomp_->Commit());
+}
+
+Overlay::Slot* Overlay::HitTest(POINT pt, bool* corner) {
+  constexpr LONG kGrip = 18; // px from the bottom-right corner that resize instead of move
+  for (auto it = slots_.rbegin(); it != slots_.rend(); ++it) {
+    const Widget& w = *it->widget;
+    const POINT p = ClampToMonitor(w, w.X(), w.Y());
+    const RECT rc{p.x, p.y, p.x + static_cast<LONG>(w.Width() * ScaleOf(w)), p.y + static_cast<LONG>(w.Height() * ScaleOf(w))};
+    if (!PtInRect(&rc, pt)) continue;
+    *corner = pt.x >= rc.right - kGrip && pt.y >= rc.bottom - kGrip;
+    return &*it;
+  }
+  return nullptr;
 }
 
 void Overlay::SetVisible(bool v) {
@@ -233,8 +270,8 @@ void Overlay::UpdateBackdrop() {
                               D2D1_ANTIALIAS_MODE_ALIASED);
       dc->Clear(D2D1::ColorF(0, 0, 0, 0.35f));
       painter_.Begin(dc.Get(), off, 1.f, Col::Panel, false);
-      painter_.FillRounded(w / 2.f - 280, 16, 560, 34, 6, Col::Rgb(0x15181E, 0.95f));
-      painter_.Text(w / 2.f - 280, 16, 560, 34, L"EDIT MODE  ·  drag widgets  ·  Ctrl+Alt+E to finish",
+      painter_.FillRounded(w / 2.f - 320, 16, 640, 34, 6, Col::Rgb(0x15181E, 0.95f));
+      painter_.Text(w / 2.f - 320, 16, 640, 34, L"EDIT MODE  ·  drag to move  ·  drag the corner to resize  ·  Ctrl+Alt+E to finish",
                     Font::TextBold, Col::EditOutline, Align::Center);
       painter_.End();
       dc->PopAxisAlignedClip();
@@ -280,25 +317,47 @@ LRESULT Overlay::HandleMessage(UINT msg, WPARAM wp, LPARAM lp) {
   switch (msg) {
     case WM_MOUSEACTIVATE:
       return MA_NOACTIVATE;
+    case WM_SETCURSOR:
+      if (editMode_ && LOWORD(lp) == HTCLIENT) {
+        POINT pt;
+        GetCursorPos(&pt);
+        ScreenToClient(hwnd_, &pt);
+        bool corner = false;
+        const bool sizing = drag_ ? resizing_ : HitTest(pt, &corner) && corner;
+        SetCursor(LoadCursorW(nullptr, sizing ? IDC_SIZENWSE : IDC_SIZEALL));
+        return TRUE;
+      }
+      break;
     case WM_LBUTTONDOWN:
       if (editMode_) {
         const POINT pt{GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
-        for (auto it = slots_.rbegin(); it != slots_.rend(); ++it) {
-          Widget& w = *it->widget;
+        bool corner = false;
+        if (Slot* s = HitTest(pt, &corner)) {
+          const Widget& w = *s->widget;
           const POINT p = ClampToMonitor(w, w.X(), w.Y());
-          const RECT rc{p.x, p.y, p.x + static_cast<LONG>(w.Width() * ScaleOf(w)),
-                        p.y + static_cast<LONG>(w.Height() * ScaleOf(w))};
-          if (PtInRect(&rc, pt)) {
-            drag_ = &*it;
-            dragOffset_ = {pt.x - p.x, pt.y - p.y};
-            SetCapture(hwnd_);
-            break;
-          }
+          drag_ = s;
+          resizing_ = corner;
+          // Moving: grab point inside the widget. Resizing: grab point relative to the corner.
+          dragOffset_ = corner ? POINT{p.x + static_cast<LONG>(w.Width() * ScaleOf(w)) - pt.x,
+                                       p.y + static_cast<LONG>(w.Height() * ScaleOf(w)) - pt.y}
+                               : POINT{pt.x - p.x, pt.y - p.y};
+          SetCapture(hwnd_);
         }
       }
       return 0;
     case WM_MOUSEMOVE:
-      if (drag_) {
+      if (drag_ && resizing_) {
+        // Scale so the bottom-right corner follows the mouse, in 5 % steps.
+        Widget& w = *drag_->widget;
+        const POINT p = ClampToMonitor(w, w.X(), w.Y());
+        const float sx = (GET_X_LPARAM(lp) + dragOffset_.x - p.x) / (w.Width() * gs_.scale);
+        const float sy = (GET_Y_LPARAM(lp) + dragOffset_.y - p.y) / (w.Height() * gs_.scale);
+        const float sc = std::clamp(std::round(std::max(sx, sy) * 20.f) / 20.f, 0.5f, 3.0f);
+        if (std::fabs(sc - w.Scale()) > 1e-3f) {
+          w.SetScale(sc);
+          if (!ResizeSlot(*drag_)) deviceLost_ = true;
+        }
+      } else if (drag_) {
         constexpr int kGrid = 4; // snap so widgets line up easily
         const POINT p = ClampToMonitor(*drag_->widget, static_cast<int>(GET_X_LPARAM(lp) - dragOffset_.x) / kGrid * kGrid,
                                        static_cast<int>(GET_Y_LPARAM(lp) - dragOffset_.y) / kGrid * kGrid);
@@ -314,7 +373,9 @@ LRESULT Overlay::HandleMessage(UINT msg, WPARAM wp, LPARAM lp) {
         Slot* s = drag_;
         drag_ = nullptr;
         ReleaseCapture();
-        if (onMoved_) onMoved_(s->widget->Section(), s->widget->X(), s->widget->Y());
+        if (resizing_) { if (onScaled_) onScaled_(s->widget->Section(), s->widget->Scale()); }
+        else if (onMoved_) onMoved_(s->widget->Section(), s->widget->X(), s->widget->Y());
+        resizing_ = false;
       }
       return 0;
     case WM_CAPTURECHANGED:

@@ -42,6 +42,7 @@ private:
   UINT resizeW_ = 0, resizeH_ = 0;
   bool closeRequested_ = false;
   float dpiScale_ = 1.f, pendingDpi_ = 0.f;
+  int autostart_ = -1;            // "Start with Windows": -1 not read yet
 
   // UI state
   int selectedWidget_ = 0;

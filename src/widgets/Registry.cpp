@@ -7,8 +7,8 @@
 namespace {
 const WidgetType* const kAll[] = {&kStandingsWidget, &kDeltaWidget,  &kTrackInfoWidget, &kSectorsWidget,
                                   &kTrackMapWidget,  &kRelativeWidget, &kClassWarnWidget, &kRadarWidget,
-                                  &kInputsWidget,    &kTyresWidget,   &kStrategyWidget,  &kDamageWidget,
-                                  &kFuelWidget,      &kPerfWidget};
+                                  &kInputsWidget,    &kAidsWidget,    &kTyresWidget,     &kStrategyWidget,
+                                  &kDamageWidget,    &kLapHistoryWidget, &kFuelWidget,  &kPerfWidget};
 }
 
 std::span<const WidgetType> WidgetTypes() {
@@ -165,6 +165,7 @@ CarState CarStateFor(const Snapshot& s, const VehicleScoringInfoV01& v) {
   if (ve > 0.0) c.energy = static_cast<int>(std::lround(std::clamp(ve, 0.0, 1.0) * 100.0));
   c.tyreF = CompoundLetter(m->tyreF);
   c.tyreR = CompoundLetter(m->tyreR);
+  if (!v.mIsPlayer && !s.othersWear) return c; // not sent online: would read 100 % for everyone
   double sum = 0;
   int n = 0;
   for (double w : m->wear) if (w > 0.0 && w <= 1.0) { sum += w; ++n; }

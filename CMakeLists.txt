@@ -71,6 +71,8 @@ add_executable(LmuOverlay WIN32
   src/widgets/RadarWidget.cpp
   src/widgets/ClassWarnWidget.cpp
   src/widgets/StrategyWidget.cpp
+  src/widgets/AidsWidget.cpp
+  src/widgets/LapHistoryWidget.cpp
 )
 
 set_target_properties(LmuOverlay PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
