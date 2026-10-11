@@ -136,6 +136,7 @@ void DemoSource::Fill(Snapshot& s, double t) {
     v.mEstimatedLapTime = c.lapTime;
     v.mBestLapTime = c.lapTime - 0.8;
     v.mLastLapTime = c.lapTime + 0.3 * std::sin(v.mTotalLaps + i);
+    if ((v.mTotalLaps + i) % 5 == 0) v.mLastLapTime = -1.0; // LMU: an invalidated lap has no time
     v.mTimeBehindLeader = (dist[order[0]] - dist[i]) / speed;
     v.mTimeBehindNext = p > 0 ? (dist[order[p - 1]] - dist[i]) / speed : 0.0;
     v.mLapsBehindLeader = static_cast<long>(std::floor((dist[order[0]] - dist[i]) / kTrackLen));
@@ -163,6 +164,8 @@ void DemoSource::Fill(Snapshot& s, double t) {
     strncpy_s(s.models[i].tyreF, i % 3 == 0 ? "Soft" : "Medium", _TRUNCATE);
     strncpy_s(s.models[i].tyreR, "Medium", _TRUNCATE);
     for (double& w : s.models[i].wear) w = 0.97 - 0.02 * i;
+    s.models[i].lapInvalid = (v.mTotalLaps + 1 + i) % 5 == 0 && frac > 0.4;
+    s.models[i].tlSteps = static_cast<uint8_t>(s.models[i].lapInvalid ? 4 : 0);
   }
 
   // Player telemetry.

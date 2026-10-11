@@ -1,5 +1,6 @@
 #include "Timing.h"
 #include "Ini.h"
+#include "Log.h"
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
@@ -194,6 +195,136 @@ void Timing::PairTrace(Vehicle& vt, const VehicleScoringInfoV01& v, bool isPlaye
   if (vt.trace.Valid() && et - vt.traceET > 10.0) vt.trace = LapTrace{};
 }
 
+// Per car, every scoring update: passing times for the gaps, invalidated laps, pit lane time.
+void Timing::TrackVehicle(Vehicle& vt, const VehicleScoringInfoV01& v, const Snapshot& s, double et, double L) {
+  if (L <= 100) return;
+
+  // Passing times. Points crossed since the last update get a time interpolated between the two.
+  const double d = v.mTotalLaps + std::clamp(v.mLapDist / L, 0.0, 0.9999);
+  const double moved = d - vt.dist;
+  if (vt.dist >= 0 && moved > 0 && moved < 0.25 && et > vt.distET) { // not a jump (garage, line glitch)
+    const long last = static_cast<long>(std::floor(d * kGapPoints));
+    for (long p = static_cast<long>(std::floor(vt.dist * kGapPoints)) + 1; p <= last; ++p) {
+      const int i = p % kGapPoints;
+      vt.crossET[i] = vt.distET + (et - vt.distET) * (static_cast<double>(p) / kGapPoints - vt.dist) / moved;
+      vt.crossLap[i] = p / kGapPoints + 1;
+    }
+  }
+  vt.dist = d;
+  vt.distET = et;
+
+  // Cuts. LMU gives an invalidated lap no time (mLastLapTime -1); the time can arrive an update after
+  // the lap count, so decide when it changes (or after a moment).
+  const Snapshot::CarModel* cm = s.CarFor(v.mID);
+  vt.liveInvalid = cm && cm->lapInvalid;
+  vt.tlSteps = cm ? cm->tlSteps : 0;
+  if (vt.lapsSeen >= 0 && v.mTotalLaps != vt.lapsSeen) {
+    const int phase = s.scoring.mGamePhase;
+    if (v.mTotalLaps == vt.lapsSeen + 1 && !vt.lapPitted && !v.mInPits && phase >= 5 && phase <= 8) {
+      vt.checking = true;
+      vt.checkSince = et;
+      vt.checkPrev = vt.lastLapSeen;
+    } else {
+      vt.lastInvalid = false;
+    }
+    vt.prevFlagged = vt.lapFlagged;
+    vt.lapPitted = false;
+    vt.lapFlagged = false;
+  }
+  vt.lapsSeen = v.mTotalLaps;
+  if (v.mInPits) vt.lapPitted = true;
+  if (vt.liveInvalid && !vt.checking) vt.lapFlagged = true;
+  if (vt.checking && (v.mLastLapTime != vt.checkPrev || et - vt.checkSince > 2.5)) {
+    vt.checking = false;
+    vt.lastInvalid = v.mLastLapTime <= 0 || vt.prevFlagged;
+    if (vt.lastInvalid) {
+      ++vt.cuts;
+      Logf("cut: %s lap %d invalid (time %.3f, live flag %d, tl steps %d) - %d so far",
+           FixedString(v.mDriverName, sizeof(v.mDriverName)).c_str(), v.mTotalLaps, v.mLastLapTime,
+           vt.prevFlagged ? 1 : 0, vt.tlSteps, vt.cuts);
+    }
+  }
+
+  // Pit lane loss: entry to exit, minus the time stood still, minus the same stretch at racing pace.
+  const double dt = vt.seen ? std::clamp(et - vt.prevET, 0.0, 1.0) : 0.0;
+  if (v.mInPits) {
+    if (!vt.prevInPits && vt.seen) {
+      vt.pitEntryET = et;
+      vt.pitEntryD = v.mLapDist;
+      vt.pitStill = 0;
+      vt.pitGarage = false;
+    }
+    if (v.mInGarageStall || v.mFinishStatus != 0) vt.pitGarage = true; // repairs / retired: not a normal stop
+    if (std::hypot(v.mLocalVel.x, v.mLocalVel.z) < 1.0) vt.pitStill += dt;
+  } else if (vt.prevInPits && vt.pitEntryET >= 0) {
+    const double lane = et - vt.pitEntryET - vt.pitStill;
+    const double track = TimeAlong(vt.pitEntryD, v.mLapDist);
+    if (!vt.pitGarage && track > 0 && lane > 0 && et - vt.pitEntryET < 600) AddPitSample(lane - track);
+    vt.pitEntryET = -1;
+  }
+  vt.prevInPits = v.mInPits;
+  vt.prevET = et;
+  vt.seen = true;
+}
+
+void Timing::AddPitSample(double loss) {
+  if (loss < 5.0 || loss > 90.0) return; // a car parked on the pit entry / exit, bad data
+  pitSamples_[pitHead_] = loss;
+  pitHead_ = (pitHead_ + 1) % kPitSamples;
+  pitN_ = std::min(pitN_ + 1, kPitSamples);
+  double sorted[kPitSamples];
+  std::copy(pitSamples_, pitSamples_ + pitN_, sorted);
+  std::sort(sorted, sorted + pitN_);
+  pitLoss_ = sorted[pitN_ / 2];
+  Logf("pit lane: a car lost %.1f s driving through, median %.1f s (%d samples)", loss, pitLoss_, pitN_);
+  if (std::fabs(pitLoss_ - pitSaved_) >= 0.3) SavePit();
+}
+
+void Timing::LoadPit() {
+  pitN_ = pitHead_ = 0;
+  pitLoss_ = pitSaved_ = 0;
+  if (recordsDir_.empty() || mapTrack_.empty()) return;
+  IniDoc doc;
+  if (!doc.Load(recordsDir_ + L"\\" + SafeFileName(mapTrack_) + L".pit.ini")) return;
+  pitLoss_ = pitSaved_ = doc.GetFloat("pit", "lane_loss", 0);
+  if (pitLoss_ > 0) { pitSamples_[0] = pitLoss_; pitN_ = 1; pitHead_ = 1; } // counts as one sample
+}
+
+void Timing::SavePit() {
+  if (recordsDir_.empty() || mapTrack_.empty()) return;
+  CreateDirectoryW(recordsDir_.c_str(), nullptr);
+  IniDoc doc;
+  doc.header = "Seconds lost driving through the pit lane (without stopping), learned from cars that pit.";
+  doc.Set("info", "track", mapTrack_);
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%.2f", pitLoss_);
+  doc.Set("pit", "lane_loss", buf);
+  doc.Save(recordsDir_ + L"\\" + SafeFileName(mapTrack_) + L".pit.ini");
+  pitSaved_ = pitLoss_;
+}
+
+bool Timing::Gap(long aheadId, long behindId, double& seconds, int& laps) const {
+  const Vehicle* a = Find(aheadId);
+  const Vehicle* b = Find(behindId);
+  if (!a || !b || a->dist < 0 || b->dist < 0) return false;
+  const bool swapped = a->dist < b->dist;
+  if (swapped) std::swap(a, b);
+  laps = static_cast<int>(std::floor(a->dist - b->dist));
+  seconds = 0;
+  bool found = laps > 0;
+  // The last point the car behind passed; the one ahead passed it on the same lap. Walk back a few
+  // points if either is missing one (line crossing, joined mid-lap).
+  for (long p = static_cast<long>(std::floor(b->dist * kGapPoints)), k = 0; !found && p >= 0 && k < 20; --p, ++k) {
+    const int i = p % kGapPoints, lap = p / kGapPoints + 1;
+    if (b->crossLap[i] != lap || a->crossLap[i] != lap) continue;
+    seconds = std::fmax(0.0, b->crossET[i] - a->crossET[i]);
+    found = true;
+  }
+  if (!found) return false;
+  if (swapped) { seconds = -seconds; laps = -laps; }
+  return true;
+}
+
 const Timing::Vehicle* Timing::Find(long id) const {
   const auto it = vehicles_.find(id);
   return it == vehicles_.end() ? nullptr : &it->second;
@@ -300,6 +431,7 @@ void Timing::Update(const Snapshot& s, int playerIdx) {
     const VehicleScoringInfoV01& v = s.vehicles[i];
     auto [it, isNew] = vehicles_.try_emplace(v.mID);
     Vehicle& vt = it->second;
+    TrackVehicle(vt, v, s, et, L);
     const bool isPlayer = i == playerIdx;
     const bool playerClass = myClass && strncmp(v.mVehicleClass, myClass, sizeof(v.mVehicleClass)) == 0;
     // Other cars' traces at scoring rate (the player's is recorded above from telemetry).
@@ -551,6 +683,7 @@ void Timing::RecordConsumption(double fuelPerLap, double energyPerLap) {
 
 void Timing::LoadMap(const std::string& track, double length) {
   mapTrack_ = track;
+  LoadPit();
   map_.Reset(length);
   mapSavedVersion_ = map_.Version();
   if (recordsDir_.empty()) return;

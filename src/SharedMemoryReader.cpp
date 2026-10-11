@@ -72,6 +72,8 @@ bool SharedMemoryReader::CopyFrame(Snapshot& s) {
     std::memcpy(cm.tyreF, ti.mFrontTireCompoundName, sizeof(cm.tyreF));
     std::memcpy(cm.tyreR, ti.mRearTireCompoundName, sizeof(cm.tyreR));
     for (int w = 0; w < 4; ++w) cm.wear[w] = ti.mWheel[w].mWear;
+    cm.lapInvalid = ti.mLapInvalidated;
+    cm.tlSteps = ti.mTrackLimitsSteps;
   }
   s.numModels = active;
   // ---- end critical section ----

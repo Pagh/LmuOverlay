@@ -234,10 +234,11 @@ void Model::UpdatePlan() {
   }
   p.fillFuel = p.fuelCap;
   p.fillEnergy = p.energyPerLap > 0 ? 1.0 : 0.0;
-  const double perStop = (need - p.lapsOnFull) / p.stops; // laps each stop has to add
-  if (p.fuelPerLap > 0) p.addFuel = p.fuelCap > 0 ? std::fmin(p.fuelCap, perStop * p.fuelPerLap) : perStop * p.fuelPerLap;
-  if (p.energyPerLap > 0) p.addEnergy = std::fmin(1.0, perStop * p.energyPerLap);
   p.stopLap = std::max(1, static_cast<int>(std::floor(p.lapsOnFull)));
+  // LMU's pit menu sets the level you leave with: the laps after the first stop split over the stops.
+  const double stint = (p.totalLaps - p.stopLap + 1.0) / p.stops;
+  if (p.fuelPerLap > 0) p.addFuel = p.fuelCap > 0 ? std::fmin(p.fuelCap, stint * p.fuelPerLap) : stint * p.fuelPerLap;
+  if (p.energyPerLap > 0) p.addEnergy = std::fmin(1.0, stint * p.energyPerLap);
 }
 
 void Model::UpdateRaceInfo() {
@@ -339,14 +340,26 @@ void Model::UpdateRaceInfo() {
   r.stopRequired = r.stopsLeft > 0;
   r.spareLaps = -shortBy;
   if (!r.stopRequired) return;
-  // Each stop adds an equal share of what's missing (+1 lap spare), never more than fits.
-  const double perStop = (shortBy + 1.0) / r.stopsLeft;
-  if (r.fuelPerLap > 0) r.addFuel = std::fmin(perStop * r.fuelPerLap, std::fmax(0.0, r.fuelCap - r.fuel));
-  if (r.usesEnergy && r.energyPerLap > 0) r.addEnergy = std::fmin(perStop * r.energyPerLap, std::fmax(0.0, 1.0 - r.energy));
   // Latest: the lap the tank runs dry on. Earliest: once the remaining stops can cover the rest.
   r.windowClose = r.lap + static_cast<int>(std::floor(inTank + myFrac)) - 1;
   const double coverable = r.stopsLeft * onFull;
   r.windowOpen = std::max(r.lap, static_cast<int>(std::ceil(r.lap - 1 + myFrac + r.lapsToGo - coverable - 1e-6)));
   if (r.windowClose < r.lap) r.windowClose = r.lap;
   if (r.windowOpen > r.windowClose) r.windowOpen = r.windowClose;
+
+  // What to set in the pit menu (the level you leave with) for a stop at the end of this lap, or of
+  // the first lap of the window: the laps left after it, split evenly over the stops left (+1 lap
+  // spare), never more than fits. The earlier you stop, the more it is.
+  r.targetLap = std::max(r.lap, r.windowOpen);
+  const double untilStop = player->mInPits ? 0.0 : (1.0 - myFrac) + (r.targetLap - r.lap); // laps to drive before it
+  const double after = std::fmax(0.0, r.lapsToGo - untilStop);
+  const double stint = (after + 1.0) / r.stopsLeft;
+  if (r.fuelPerLap > 0) {
+    r.targetFuel = r.fuelCap > 0 ? std::fmin(r.fuelCap, stint * r.fuelPerLap) : stint * r.fuelPerLap;
+    r.addFuel = std::fmax(0.0, r.targetFuel - std::fmax(0.0, r.fuel - untilStop * r.fuelPerLap));
+  }
+  if (r.usesEnergy && r.energyPerLap > 0) {
+    r.targetEnergy = std::fmin(1.0, stint * r.energyPerLap);
+    r.addEnergy = std::fmax(0.0, r.targetEnergy - std::fmax(0.0, r.energy - untilStop * r.energyPerLap));
+  }
 }

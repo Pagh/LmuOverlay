@@ -84,7 +84,11 @@ struct RaceInfo {
   bool stopRequired = false;    // the race can't be done on one tank (before the start: whole race; after: from here)
   int stopsLeft = 0;
   double fillFuel = 0, fillEnergy = 0; // what to start the race with: race laps + 1 spare, capped
-  double addFuel = 0, addEnergy = 0;   // to add at the next stop (same margin)
+  // LMU's pit menu sets the level you leave the pits with, not an amount to add. So the strategy shows
+  // that level, for a stop at the end of targetLap (this lap, or the first lap of the window).
+  int targetLap = 0;
+  double targetFuel = 0, targetEnergy = 0; // levels to set for that stop (same margin)
+  double addFuel = 0, addEnergy = 0;   // what that stop puts in (for the stop time)
   int windowOpen = 0, windowClose = 0; // laps (1-based) between which the next stop works
   double spareLaps = 0;         // no stop needed: laps of fuel left over at the flag
 };
@@ -111,7 +115,7 @@ struct RacePlan {
   bool energyLimited = false;
   int stops = 0;
   double fillFuel = 0, fillEnergy = 0; // to start with
-  double addFuel = 0, addEnergy = 0;   // at each stop
+  double addFuel = 0, addEnergy = 0;   // level to fill to at each stop (LMU's pit menu is the level you leave with)
   int stopLap = 0;              // latest lap for the first stop
   double spareLaps = 0;         // no stop: laps left over at the flag
 };

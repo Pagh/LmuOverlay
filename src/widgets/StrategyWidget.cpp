@@ -1,6 +1,7 @@
 // Strategy. In races: when a pit stop is required (a full tank / 100 % energy can't reach the
 // flag) it shows fuel / energy, laps to the end, the pit window, what to add and how long the
-// stop takes; otherwise it shrinks to a one-line fuel check. In practice / qualifying: the plan
+// stop takes; otherwise it shrinks to a one-line fuel check. Amounts are the levels to set in LMU's
+// pit menu, which is the fuel / energy you leave the pits with (not an amount to add). In practice / qualifying: the plan
 // for the race set in Settings > General > Race plan.
 #include "widgets/Widget.h"
 #include <algorithm>
@@ -33,7 +34,8 @@ struct View {
   int onFull = -1;              // 0.1 laps
   int stops = 0;
   int windowOpen = 0, windowClose = 0, lap = 0;
-  int addFuelDl = 0, addEnergyPm = 0;
+  int addFuelDl = 0, addEnergyPm = 0;     // race plan: level to fill to at each stop
+  int targetLap = 0, targetFuelDl = 0, targetEnergyPm = 0; // race: level to set for a stop at the end of targetLap
   int refuelS = -1, tyresS = -1;
   int spare = 0;                // 0.1 laps (check mode)
   bool operator==(const View&) const = default;
@@ -173,10 +175,15 @@ private:
       p.Textf(kPad, y, kW - 2 * kPad, kRow, Font::TextBold, Col::Text, Align::Right, L"laps %d – %d", v.windowOpen, v.windowClose);
     }
     y += kRow;
-    row(L"At the stop add");
+    // LMU's pit menu takes the level you leave with: show that, for boxing at the end of this lap
+    // (or of the first lap of the window). It drops every lap you stay out.
+    wchar_t label[40];
+    if (v.targetLap > v.lap) swprintf_s(label, L"Fill to · box lap %d", v.targetLap);
+    else wcscpy_s(label, L"Fill to · box this lap");
+    p.Text(kPad, y, 200, kRow, label, Font::Small, Col::Dim);
     if (v.energy) p.Textf(kPad, y, kW - 2 * kPad, kRow, Font::TextBold, Col::Text, Align::Right, L"%.0f %% energy  ·  %.0f L",
-                          v.addEnergyPm / 10.0, v.addFuelDl / 10.0);
-    else p.Textf(kPad, y, kW - 2 * kPad, kRow, Font::TextBold, Col::Text, Align::Right, L"%.1f L", v.addFuelDl / 10.0);
+                          std::ceil(v.targetEnergyPm / 10.0), v.targetFuelDl / 10.0);
+    else p.Textf(kPad, y, kW - 2 * kPad, kRow, Font::TextBold, Col::Text, Align::Right, L"%.1f L", v.targetFuelDl / 10.0);
     y += kRow;
     row(L"Stop time");
     if (v.refuelS >= 0) {
@@ -250,9 +257,10 @@ private:
     row(L"First stop by");
     p.Textf(kPad, y, rw, kRow, Font::TextBold, Col::Text, Align::Right, L"lap %d", v.stopLap);
     y += kRow;
-    row(v.stops == 1 ? L"At the stop add" : L"At each stop add");
+    // Stopping on an empty tank: the pit menu level (what you leave with) is the share of each stint.
+    row(v.stops == 1 ? L"At the stop fill to" : L"At each stop fill to");
     if (v.energy) p.Textf(kPad, y, rw, kRow, Font::TextBold, Col::Text, Align::Right, L"%.0f %% energy  ·  %.0f L",
-                          v.addEnergyPm / 10.0, v.addFuelDl / 10.0);
+                          std::ceil(v.addEnergyPm / 10.0), v.addFuelDl / 10.0);
     else p.Textf(kPad, y, rw, kRow, Font::TextBold, Col::Text, Align::Right, L"%.1f L", v.addFuelDl / 10.0);
     y += kRow;
     if (v.refuelS >= 0) {
@@ -318,8 +326,9 @@ private:
     v.windowOpen = r.windowOpen;
     v.windowClose = r.windowClose;
     if (!r.started) v.windowClose = static_cast<int>(std::floor(r.lapsOnFull));
-    v.addFuelDl = Quantize(r.addFuel, 0.1);
-    v.addEnergyPm = Quantize(r.addEnergy * 100.0, 0.1);
+    v.targetLap = r.targetLap;
+    v.targetFuelDl = Quantize(r.targetFuel, 0.1);
+    v.targetEnergyPm = Quantize(r.targetEnergy * 100.0, 0.1);
     if (m.rest && m.rest->valid && (m.rest->fuelFillRate > 0 || m.rest->energyFillRate > 0)) {
       double t = 0;
       if (r.addFuel > 0 && m.rest->fuelFillRate > 0) t = m.rest->fuelInsert + r.addFuel / m.rest->fuelFillRate;

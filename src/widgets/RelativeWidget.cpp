@@ -26,6 +26,7 @@ struct Row {
   int gapMs = 0;            // |gap| in ms
   int lapDiff = 0;          // >0 = they are laps ahead of you, <0 = behind
   int lastMs = 0, bestMs = 0;
+  bool lastInvalid = false; // last lap invalidated (track limits)
   int secMs[3]{};           // sectors: this lap's as they complete them, else the previous lap's
   bool secOld[3]{};         // from the previous lap (drawn dimmed)
   TimeTint lastTint = kTintNormal, bestTint = kTintNormal, secTint[3]{};
@@ -174,8 +175,11 @@ public:
 
       wchar_t buf[24];
       if (last_) {
-        FormatTime(buf, 24, r.lastMs, timeDecimals_);
-        p.Text(x, y, kLapW, kRowH, buf, Font::Text, r.lastMs ? timeColor(r.lastTint) : Col::Dim, Align::Right);
+        if (r.lastInvalid) p.Text(x, y, kLapW, kRowH, L"✕ cut", Font::Text, Col::Warn, Align::Right);
+        else {
+          FormatTime(buf, 24, r.lastMs, timeDecimals_);
+          p.Text(x, y, kLapW, kRowH, buf, Font::Text, r.lastMs ? timeColor(r.lastTint) : Col::Dim, Align::Right);
+        }
         x += kLapW;
       }
       if (best_) {
@@ -334,6 +338,7 @@ private:
     if (race) r.lapDiff = static_cast<int>(std::lround((total - d) / m.trackLength));
 
     if (o.mLastLapTime > 0) r.lastMs = static_cast<int>(std::lround(o.mLastLapTime * 1000.0));
+    if (const Timing::Vehicle* tv = m.timing ? m.timing->Find(o.mID) : nullptr) r.lastInvalid = tv->lastInvalid;
     if (o.mBestLapTime > 0) r.bestMs = static_cast<int>(std::lround(o.mBestLapTime * 1000.0));
     r.lastTint = TintFor(m.timing, o, 3, o.mLastLapTime);
     r.bestTint = TintFor(m.timing, o, 3, o.mBestLapTime) == kTintClass ? kTintClass : kTintNormal;

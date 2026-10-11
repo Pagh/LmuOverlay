@@ -1,5 +1,7 @@
 // Track map: the circuit outline (learned from the cars' positions, saved per track), every
 // car as a dot in its class colour, you in white, and yellow-flagged sectors highlighted.
+// A ring marks where you'd rejoin if you pitted now: the point as many seconds behind you as a stop
+// costs (pit lane loss learned from the cars that pit + LMU's estimate of the stop itself).
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <cmath>
@@ -9,6 +11,7 @@ namespace {
 
 constexpr int kMaxDots = kMaxVehicles;
 constexpr float kPad = 8.f;
+constexpr double kDefaultLaneLoss = 25.0; // s, until a car has been seen driving through the pit lane
 
 struct Dot {
   int16_t x = 0, y = 0;
@@ -23,6 +26,10 @@ struct View {
   int learnPct = 0;
   uint32_t mapVersion = 0;
   bool yellow[3]{};
+  bool pitExit = false;
+  bool pitEstimated = false; // pit lane loss not measured yet: default value
+  int16_t px = 0, py = 0;
+  int pitLossS = 0;
   int count = 0;
   Dot dots[kMaxDots];
   bool operator==(const View&) const = default;
@@ -32,6 +39,11 @@ const OptionDef kOptions[] = {
   OptInt("size", "Size (px)", 200, 100, 600),
   OptBool("show_yellow", "Highlight yellow sectors", true),
   OptInt("dot_size", "Car dot size (px)", 5, 2, 12),
+  OptBool("show_pit_exit", "Where you'd rejoin after a pit stop", true,
+          "A ring at the point as many seconds behind you as a stop costs: the cars near it are the ones\n"
+          "you'd come out next to. Pit lane loss learned from the cars that pit (dimmed, with ≈, until then)\n"
+          "+ LMU's estimate of the stop with your current pit menu."),
+  OptColor("pit_exit", "Pit rejoin ring", 0x4FC3F7FF),
   OptColor("track", "Track", 0xC8CED880),
   OptColor("player", "You", 0xF2F4F7FF),
   OptColor("yellow", "Yellow sector", 0xFFC23DFF),
@@ -44,6 +56,8 @@ public:
         size_(static_cast<float>(o.Int("size"))),
         showYellow_(o.Bool("show_yellow")),
         dot_(static_cast<float>(o.Int("dot_size"))),
+        pitExit_(o.Bool("show_pit_exit")),
+        pitColor_(o.Color("pit_exit")),
         track_(o.Color("track")),
         player_(o.Color("player")),
         yellow_(o.Color("yellow")) {}
@@ -83,6 +97,14 @@ public:
         if (me) p.FillRounded(d.x - r - 1.5f, d.y - r - 1.5f, 2 * r + 3, 2 * r + 3, r + 1.5f, Col::Rgb(0x0D0F12));
         p.FillRounded(d.x - r, d.y - r, 2 * r, 2 * r, r, c);
       }
+    if (view_.pitExit) {
+      const float r = dot_ + 5;
+      D2D1_COLOR_F c = pitColor_;
+      if (view_.pitEstimated) c.a *= 0.55f;
+      p.Outline(view_.px - r, view_.py - r, 2 * r, 2 * r, r, c, 2.f);
+      p.Textf(kPad, 2, w - 2 * kPad, 16, Font::Small, c, Align::Left, view_.pitEstimated ? L"PIT ≈ %d s" : L"PIT %d s",
+              view_.pitLossS);
+    }
   }
 
 private:
@@ -150,7 +172,39 @@ private:
       d.cls = i == m.playerIdx ? 255 : ClassIndex(o.mVehicleClass);
       d.pit = o.mInPits;
     }
+    if (pitExit_ && !m.player->mInPits) BuildPitExit(m, map, v);
     map_ = &map;
+  }
+
+  // The point on track a stop's worth of seconds behind you, at your pace (recorded lap), else
+  // in proportion to the lap time.
+  void BuildPitExit(const Model& m, const TrackMap& map, View& v) const {
+    const double L = m.trackLength;
+    double lane = m.timing->PitLaneLoss();
+    v.pitEstimated = lane <= 0;
+    if (v.pitEstimated) lane = kDefaultLaneLoss;
+    const double still = m.rest && m.rest->valid && m.rest->pitTotalSeconds > 0 ? m.rest->pitTotalSeconds : 0.0;
+    const double loss = lane + still;
+    const double lapTime = m.refLapTime > 0 ? m.refLapTime : 120.0;
+    const double myD = m.LiveLapDist(*m.player);
+    const double inLap = std::fmod(loss, lapTime); // a stop longer than a lap: the same point, a lap down
+    auto wrap = [L](double d) { return d < 0 ? d + L : d; };
+    double back = inLap / lapTime * L;
+    if (m.timing->TimeAlong(wrap(myD - L * 0.5), myD) > 0) {
+      double lo = 0, hi = L - 1.0;
+      for (int k = 0; k < 24; ++k) {
+        const double mid = (lo + hi) / 2;
+        (m.timing->TimeAlong(wrap(myD - mid), myD) < inLap ? lo : hi) = mid;
+      }
+      back = (lo + hi) / 2;
+    }
+    float x, z;
+    if (!map.Position(wrap(myD - back), x, z)) return;
+    const D2D1_POINT_2F pt = Project(fit_, x, z);
+    v.pitExit = true;
+    v.px = static_cast<int16_t>(std::lround(pt.x));
+    v.py = static_cast<int16_t>(std::lround(pt.y));
+    v.pitLossS = static_cast<int>(std::lround(loss));
   }
 
   void EnsureGeometry(Painter& p) {
@@ -187,6 +241,8 @@ private:
   float size_;
   bool showYellow_;
   float dot_;
+  bool pitExit_;
+  D2D1_COLOR_F pitColor_;
   D2D1_COLOR_F track_, player_, yellow_;
   View view_;
   const TrackMap* map_ = nullptr;
@@ -201,5 +257,7 @@ private:
 } // namespace
 
 const WidgetType kTrackMapWidget{
-  "trackmap", "Track map", "Circuit outline with every car; yellow sectors highlighted. Learns each track once.",
+  "trackmap", "Track map",
+  "Circuit outline with every car; yellow sectors highlighted; where you'd rejoin after a pit stop. Learns each "
+  "track once.",
   true, 1704, 140, 100, kOptions, CreateWidget<TrackMapWidget>};

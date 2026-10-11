@@ -99,18 +99,18 @@ monitor's top-left corner and are always clamped onto it, so a widget can't be l
 
 | Widget | Shows |
 |---|---|
-| standings | Session info on top: session, time left, lap / estimated race laps, race length, pit stop required or not, track / air temperature, rain. Before a race starts: race length in laps and what to fill up with. Then your class: leaders + cars around you, make, best / last lap, fuel + virtual energy left, tyre compound + tread, gap (race: time behind on track; practice / qualifying: best-lap difference) |
+| standings | Session info on top: session, time left, lap / estimated race laps, race length, pit stop required or not, track / air temperature, rain. Before a race starts: race length in laps and what to fill up with. Then your class: leaders + cars around you, make, best / last lap (`✕ cut` if invalidated), laps invalidated this session, fuel + virtual energy left, tyre compound + tread, gap to the class leader / car ahead / you (race: measured where both cars passed the same point, so it works in multi-class races; practice / qualifying: best-lap difference) |
 | delta | Live delta (number + bar) against a selectable reference: your best (LMU's own delta), session best, all-time best (any car of your class), the lobby's fastest lap in your class, or your last valid lap (with the spread of your last 5 laps, for consistency) |
 | trackinfo | Small bar under the delta, only when something matters: stopped / slow car ahead with the distance in metres, local yellow, full-course yellow, blue flag, race phase, track-limit points, penalties, lap valid / invalid (practice, qualifying) |
 | sectors | Compact (default): three boxes with this lap's sector gaps to the reference + last / best / ideal lap. Table: this lap, last lap, session best, all-time best (saved in `records\`), lobby best |
-| trackmap | Circuit outline (learned from all cars' positions, saved in `records\<track>.map.ini`), every car in its class colour, yellow sectors highlighted |
+| trackmap | Circuit outline (learned from all cars' positions, saved in `records\<track>.map.ini`), every car in its class colour, yellow sectors highlighted, and a ring where you'd rejoin if you pitted now (pit lane loss learned from cars that pit, saved in `records\<track>.pit.ini`, + LMU's stop estimate) |
 | relative | Cars nearest on track: make, last lap, best lap, last-lap sectors, gap, and how the gap changed over your last lap; optional fuel / energy and tyres columns |
 | classwarn | Red pill when a faster class is closing in behind you ("HYPERCAR 1.8 s behind") |
 | radar | Side bars while a car is alongside (CAR LEFT / RIGHT / 3-WIDE) |
 | inputs | RPM / shift light, gear, speed, TC / cut / slip / ABS / map, brake bias, water / oil (or battery), throttle / brake trace of the last 12 s with lock-ups and wheel spin marked |
 | aids | TC and ABS activity: the label lights up while the aid works (`mTCActive` / `mABSActive`), a strip shows when it worked over the last 5 s; optional count per lap |
 | tyres | Inner-layer (or surface / carcass) temperature with L/C/R strip, coloured against the compound's optimal temperature, pressure, tread left, brake temperature; optional READY TO PUSH badge |
-| strategy | Races: pit stop required → fuel / energy, laps to the end, pit window, what to add, stop time; otherwise a one-line fuel check. Practice / qualifying: plan for the race set in Settings > General > Race plan (time or laps) |
+| strategy | Races: pit stop required → fuel / energy, laps to the end, pit window, the level to set in LMU's pit menu (it's the level you leave with, not an amount to add; for boxing at the end of this lap), stop time; otherwise a one-line fuel check. Practice / qualifying: plan for the race set in Settings > General > Race plan (time or laps) |
 | damage | After a hit: car silhouette with the hit zones, aero and suspension damage %, repair time, lap time lost; for a few seconds after any contact ("CONTACT · NO DAMAGE"), with the session's contact count |
 | laps | Lap history: your last laps with time (invalid struck through), gap to your session best, fuel / energy / tyre tread used; top row = lap in progress, fuel / energy used so far minus your last clean lap's at the same point |
 | fuel | Detailed fuel / energy table (off by default; Strategy covers it) |

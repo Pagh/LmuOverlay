@@ -122,7 +122,14 @@ Sotto, la tua classe: i primi della classe più le macchine intorno a te, con nu
 ultimo giro, distacco, **carburante ed energia virtuale** rimasti (`62  48%`: carburante a sinistra, energia
 in blu a destra) e **gomme** (mescola S / M / H / W, anteriore e posteriore se diverse, e battistrada
 rimasto). Online LMU non manda l'usura delle gomme degli altri (risulterebbero tutti al 100 %): in quel caso
-il battistrada non viene mostrato, resta solo la mescola. In gara il distacco è il tempo in pista; in prova e qualifica è la differenza tra i migliori giri.
+il battistrada non viene mostrato, resta solo la mescola. In gara il distacco è il tempo in pista, misurato
+dall'overlay nel punto in cui sono passate entrambe le macchine (funziona anche nelle gare multiclasse); in
+prova e qualifica è la differenza tra i migliori giri.
+
+**Tagli (CUTS)**: quanti giri LMU ha invalidato a ogni pilota in questa sessione (`✕2`); i giri di
+entrata / uscita box non contano. Nella colonna dell'ultimo giro compare `✕ cut` se l'ultimo giro è stato
+invalidato. Un pallino rosso vuol dire che il giro in corso è già invalido (solo se LMU manda questa
+informazione anche per le altre macchine: da verificare online).
 
 | Opzione | Cosa fa |
 |---|---|
@@ -131,7 +138,8 @@ il battistrada non viene mostrato, resta solo la mescola. In gara il distacco è
 | Session info / Track / air temperature and rain | Mostra la scheda sessione e il meteo |
 | Column: car number / car make / best lap / last lap / fuel / tyres | Accende o spegne le colonne |
 | Show pit stop count | Numero di soste di ogni pilota |
-| Gap to (leader) | Distacco dal leader o dalla macchina davanti |
+| Column: cuts (sì) | Giri invalidati per i track limits |
+| Gap to (leader) | Distacco dal leader di classe, dalla macchina davanti (`INT`) oppure **da te** (`TO YOU`: `-` = davanti a te, `+` = dietro) |
 | Gap decimals / Lap time decimals (3) | Decimali di distacchi e tempi |
 
 ### Delta
@@ -210,7 +218,15 @@ Il tracciato con tutte le macchine nel colore della loro classe e i settori in g
 si **impara da sola** dalle posizioni delle macchine: la prima volta su una pista nuova si completa in un
 giro o due, poi resta salvata.
 
-Opzioni: dimensione (200 px), evidenziare i settori gialli, dimensione dei punti, colori.
+**Uscita dai box**: un anello azzurro, sempre acceso, segna dove rientreresti in pista se ti fermassi
+adesso: il punto che sta dietro di te di tanti secondi quanti ne costa una sosta (in alto `PIT 34 s`). Le
+macchine vicine all'anello sono quelle con cui usciresti. Il costo è il tempo perso nella corsia box
+(imparato da tutte le macchine che si fermano, salvato per pista in `records\<pista>.pit.ini`) più la stima
+di LMU della sosta con il menu pit attuale. Finché nessuno è passato dai box l'anello è più tenue e usa
+25 s (`PIT ≈`).
+
+Opzioni: dimensione (200 px), evidenziare i settori gialli, dimensione dei punti, anello di uscita dai box,
+colori.
 
 ### Relative
 
@@ -307,7 +323,12 @@ della gara × consumo per giro, confrontato con un pieno (o il 100 % di energia 
 tempo conta che, allo scadere, il leader assoluto finisce il giro.
 
 - **Serve una sosta**: mostra carburante / energia, giri alla fine, quante soste, la finestra di pit
-  (`Pit window`, `BOX THIS LAP` quando è il momento), quanto aggiungere alla sosta e il tempo della sosta.
+  (`Pit window`, `BOX THIS LAP` quando è il momento), il livello da impostare nel menu pit e il tempo
+  della sosta.
+- **`Fill to`** è il **totale** con cui esci dai box, cioè proprio il numero da mettere nel menu pit di LMU
+  (LMU imposta il livello finale, non quanto aggiungere). Vale se rientri alla fine del giro indicato
+  (`box this lap`, oppure `box lap N` prima che si apra la finestra) e **cala a ogni giro** che resti
+  fuori: più presto ti fermi, più energia / benzina ti serve. Controllalo nel giro in cui rientri.
 - **Non serve**: una sola riga di controllo carburante (`+1.2 lap spare` o quanto manca).
 
 Il consumo viene misurato sui giri puliti e salvato per pista e macchina. Finché non c'è, usa la stima
@@ -324,7 +345,8 @@ mostra allora `RACE PLAN · 1 h` con:
 - quanti giri dura un pieno;
 - con cosa partire, oppure `full` se serve una sosta;
 - `NO STOP` con i giri di margine all'arrivo, oppure il numero di soste, entro che giro fermarti la
-  prima volta, quanto aggiungere a ogni sosta e il tempo della sosta.
+  prima volta, il livello da impostare nel menu pit a ogni sosta (`fill to`, il totale con cui esci) e
+  il tempo della sosta.
 
 Si aggiorna giro dopo giro mentre il passo e il consumo si stabilizzano. Finché manca un giro pulito
 mostra `drive a clean lap to measure`. Nella finestra Impostazioni, sotto il piano, vedi subito il

@@ -1,6 +1,7 @@
 // Standings for your class with the session info on top: session, time left, race length in
 // laps (estimated for timed races, also before the start), what to fill up with, whether a pit
-// stop is required, and the conditions. Then the leaders plus the cars around you.
+// stop is required, and the conditions. Then the leaders plus the cars around you, with their
+// gap (to the class leader, the car ahead or you) and the laps LMU invalidated for track limits.
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <cmath>
@@ -11,7 +12,9 @@ constexpr int kMaxRows = 20;
 constexpr float kRowH = 20.f, kPad = 6.f, kHeaderH = 18.f;
 constexpr float kLine1H = 22.f, kLine2H = 16.f, kCardH = 50.f, kNoteH = 16.f;
 constexpr float kSessionMaxH = kLine1H + kLine2H + 4 + kCardH + 4 + kNoteH + 6;
-constexpr float kPosW = 28.f, kNumW = 40.f, kBrandW = 40.f, kNameW = 150.f, kTagW = 32.f, kLapW = 72.f, kGapW = 70.f;
+constexpr float kPosW = 28.f, kNumW = 40.f, kBrandW = 40.f, kNameW = 150.f, kTagW = 32.f, kLapW = 72.f, kCutW = 44.f, kGapW = 70.f;
+
+enum class GapTo : uint8_t { Leader, Ahead, You };
 
 struct Row {
   int classPlace = 0;
@@ -20,8 +23,12 @@ struct Row {
   wchar_t name[33]{};
   int lastMs = 0, bestMs = 0;
   TimeTint lastTint = kTintNormal, bestTint = kTintNormal;
-  int gapMs = 0;            // -1 = no time to compare (practice / qualifying without a lap)
-  int lapsDown = 0;
+  int gapMs = 0;            // negative: in front of the reference
+  bool gapKnown = false;    // practice / qualifying without a lap, start of the race
+  int lapsDown = 0;         // whole laps behind the reference (negative: ahead)
+  int cuts = 0;             // laps invalidated this session (pit laps not counted)
+  bool lastInvalid = false; // their last lap was invalidated
+  bool liveInvalid = false; // the lap they're on is (when LMU sends it for other cars)
   int pitstops = 0;
   CarState car;             // fuel / energy left, tyres
   bool pit = false;
@@ -75,8 +82,13 @@ const OptionDef kOptions[] = {
   OptBool("show_fuel", "Column: fuel / virtual energy %", true, "Fuel left, then virtual energy (blue) for cars that have it"),
   OptBool("show_tyres", "Column: tyres", true, "Compound (front / rear if different) and tread left"),
   OptBool("show_pitstops", "Show pit stop count", true),
-  OptChoice("gap_to", "Gap to", "leader|car ahead", 0,
-            "Race: time behind on track. Practice / qualifying: difference between best laps."),
+  OptChoice("gap_to", "Gap to", "leader|car ahead|you", 0,
+            "Race: time behind on track (measured where both cars passed). Practice / qualifying: difference\n"
+            "between best laps. \"you\": minus = in front of you, plus = behind you."),
+  OptBool("show_cuts", "Column: cuts", true,
+          "Laps LMU invalidated for track limits this session (pit laps not counted).\n"
+          "Red dot: the lap they're on is already invalid (when LMU sends it for other cars).\n"
+          "The last lap shows \"✕ cut\" when it was invalidated."),
   OptInt("gap_decimals", "Gap decimals", 3, 1, 3),
   OptInt("time_decimals", "Lap time decimals", 3, 1, 3),
   OptColor("player_row", "Your row", 0x3A4458FF),
@@ -101,7 +113,8 @@ public:
         fuel_(o.Bool("show_fuel")),
         tyres_(o.Bool("show_tyres")),
         showStops_(o.Bool("show_pitstops")),
-        toAhead_(o.Choice("gap_to") == 1),
+        cuts_(o.Bool("show_cuts")),
+        gapTo_(static_cast<GapTo>(o.Choice("gap_to"))),
         gapDecimals_(o.Int("gap_decimals")),
         timeDecimals_(o.Int("time_decimals")),
         playerRow_(o.Color("player_row")),
@@ -111,7 +124,7 @@ public:
 
   float Width() const override {
     return kPad * 2 + kPosW + (number_ ? kNumW : 0) + (brand_ ? kBrandW : 0) + kNameW + kTagW + (best_ ? kLapW : 0) + (last_ ? kLapW : 0) +
-           (fuel_ ? kCarFuelW : 0) + (tyres_ ? kCarTyreW : 0) + kGapW;
+           (cuts_ ? kCutW : 0) + (fuel_ ? kCarFuelW : 0) + (tyres_ ? kCarTyreW : 0) + kGapW;
   }
   float Height() const override { return kPad * 2 + (session_ ? kSessionMaxH : 0) + kHeaderH + kRowH * maxRows_; }
 
@@ -148,9 +161,11 @@ public:
     x += kNameW + kTagW;
     if (best_) { p.Text(x, y, kLapW, kHeaderH, L"BEST", Font::Small, Col::Dim, Align::Right); x += kLapW; }
     if (last_) { p.Text(x, y, kLapW, kHeaderH, L"LAST", Font::Small, Col::Dim, Align::Right); x += kLapW; }
+    if (cuts_) { p.Text(x, y, kCutW - 4, kHeaderH, L"CUTS", Font::Small, Col::Dim, Align::Right); x += kCutW; }
     if (fuel_) { p.Text(x, y, kCarFuelW - 2, kHeaderH, L"FUEL · VE", Font::Small, Col::Dim, Align::Right); x += kCarFuelW; }
     if (tyres_) { p.Text(x, y, kCarTyreW - 2, kHeaderH, L"TYRES", Font::Small, Col::Dim, Align::Right); x += kCarTyreW; }
-    p.Text(x, y, kGapW - 4, kHeaderH, toAhead_ ? L"INT" : L"GAP", Font::Small, Col::Dim, Align::Right);
+    p.Text(x, y, kGapW - 4, kHeaderH, gapTo_ == GapTo::Ahead ? L"INT" : gapTo_ == GapTo::You ? L"TO YOU" : L"GAP", Font::Small,
+           Col::Dim, Align::Right);
     y += kHeaderH;
 
     for (int i = 0; i < view_.count; ++i, y += kRowH) {
@@ -188,18 +203,29 @@ public:
         x += kLapW;
       }
       if (last_) {
-        FormatTime(buf, 24, r.lastMs, timeDecimals_);
-        p.Text(x, y, kLapW, kRowH, buf, Font::Text, r.lastMs ? timeColor(r.lastTint) : Col::Dim, Align::Right);
+        if (r.lastInvalid) p.Text(x, y, kLapW, kRowH, L"✕ cut", Font::Text, Col::Warn, Align::Right);
+        else {
+          FormatTime(buf, 24, r.lastMs, timeDecimals_);
+          p.Text(x, y, kLapW, kRowH, buf, Font::Text, r.lastMs ? timeColor(r.lastTint) : Col::Dim, Align::Right);
+        }
         x += kLapW;
+      }
+      if (cuts_) {
+        if (r.cuts > 0) p.Textf(x, y, kCutW - 4, kRowH, Font::Text, Col::Warn, Align::Right, L"✕%d", r.cuts);
+        if (r.liveInvalid) {
+          const float tw = r.cuts > 0 ? p.Measure(L"✕00", Font::Text) : 0.f;
+          p.FillRounded(x + kCutW - 4 - tw - 10, y + kRowH / 2 - 3, 6, 6, 3, Col::Rgb(0xFF5A5A));
+        }
+        x += kCutW;
       }
       if (fuel_) { DrawCarFuel(p, x, y, kCarFuelW, kRowH, r.car, r.pit ? 0.5f : 1.f); x += kCarFuelW; }
       if (tyres_) { DrawCarTyres(p, x, y, kCarTyreW, kRowH, r.car, r.pit ? 0.5f : 1.f); x += kCarTyreW; }
-      if (r.classPlace == 1 && !toAhead_) p.Text(x, y, kGapW - 4, kRowH, L"LEADER", Font::Small, Col::Dim, Align::Right);
-      else if (r.classPlace == 1) p.Text(x, y, kGapW - 4, kRowH, L"—", Font::Small, Col::Dim, Align::Right);
-      else if (r.gapMs < 0) p.Text(x, y, kGapW - 4, kRowH, L"—", Font::Small, Col::Dim, Align::Right);
-      else if (r.lapsDown > 0) p.Textf(x, y, kGapW - 4, kRowH, Font::Text, text, Align::Right, L"+%dL", r.lapsDown);
+      if (gapTo_ == GapTo::Leader && r.classPlace == 1) p.Text(x, y, kGapW - 4, kRowH, L"LEADER", Font::Small, Col::Dim, Align::Right);
+      else if ((gapTo_ == GapTo::Ahead && r.classPlace == 1) || (gapTo_ == GapTo::You && r.player) || !r.gapKnown)
+        p.Text(x, y, kGapW - 4, kRowH, L"—", Font::Small, Col::Dim, Align::Right);
+      else if (r.lapsDown != 0) p.Textf(x, y, kGapW - 4, kRowH, Font::Text, text, Align::Right, L"%+dL", r.lapsDown);
       else {
-        FormatGap(buf, 24, r.gapMs, gapDecimals_, L"+");
+        FormatGap(buf, 24, std::abs(r.gapMs), gapDecimals_, r.gapMs < 0 ? L"-" : L"+");
         p.Text(x, y, kGapW - 4, kRowH, buf, Font::Text, text, Align::Right);
       }
     }
@@ -392,16 +418,33 @@ private:
       if (o.mBestLapTime > 0) r.bestMs = static_cast<int>(std::lround(o.mBestLapTime * 1000.0));
       r.lastTint = TintFor(m.timing, o, 3, o.mLastLapTime);
       r.bestTint = TintFor(m.timing, o, 3, o.mBestLapTime) == kTintClass ? kTintClass : kTintNormal;
-      // Reference car: class leader, or the car one place ahead in class.
-      const VehicleScoringInfoV01& ref = toAhead_ && pick[c] > 0 ? s.vehicles[idx[pick[c] - 1]] : leader;
+      // Reference car: class leader, the car one place ahead in class, or you.
+      const VehicleScoringInfoV01& ref = gapTo_ == GapTo::You ? *m.player
+                                       : gapTo_ == GapTo::Ahead && pick[c] > 0 ? s.vehicles[idx[pick[c] - 1]] : leader;
       if (race) {
-        r.lapsDown = o.mLapsBehindLeader - ref.mLapsBehindLeader;
-        r.gapMs = Quantize(std::fmax(0.0, o.mTimeBehindLeader - ref.mTimeBehindLeader), 0.001);
+        // Measured on track: when the two cars passed the same point. LMU's time behind the
+        // leader is relative to the overall leader, so its differences break in multi-class races.
+        double sec;
+        int laps;
+        if (m.timing && m.timing->Gap(ref.mID, o.mID, sec, laps)) {
+          r.lapsDown = laps;
+          r.gapMs = Quantize(sec, 0.001);
+        } else {
+          r.lapsDown = o.mLapsBehindLeader - ref.mLapsBehindLeader;
+          r.gapMs = Quantize(o.mTimeBehindLeader - ref.mTimeBehindLeader, 0.001);
+        }
+        r.gapKnown = true;
       } else if (o.mBestLapTime > 0 && ref.mBestLapTime > 0) {
         // Practice / qualifying: positions are by best lap, so is the gap.
-        r.gapMs = Quantize(std::fmax(0.0, o.mBestLapTime - ref.mBestLapTime), 0.001);
-      } else {
-        r.gapMs = -1;
+        r.gapMs = Quantize(o.mBestLapTime - ref.mBestLapTime, 0.001);
+        r.gapKnown = true;
+      }
+      if (cuts_ || last_) {
+        if (const Timing::Vehicle* tv = m.timing ? m.timing->Find(o.mID) : nullptr) {
+          r.cuts = tv->cuts;
+          r.lastInvalid = tv->lastInvalid;
+          r.liveInvalid = tv->liveInvalid;
+        }
       }
       r.pitstops = o.mNumPitstops;
       if (fuel_ || tyres_) r.car = CarStateFor(s, o);
@@ -412,7 +455,8 @@ private:
   }
 
   int maxRows_, topRows_;
-  bool session_, conditions_, number_, brand_, best_, last_, fuel_, tyres_, showStops_, toAhead_;
+  bool session_, conditions_, number_, brand_, best_, last_, fuel_, tyres_, showStops_, cuts_;
+  GapTo gapTo_;
   int gapDecimals_, timeDecimals_;
   D2D1_COLOR_F playerRow_, text_, classBest_, personalBest_;
   View view_;

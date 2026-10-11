@@ -27,6 +27,8 @@ const wchar_t* DeltaRefLabel(DeltaRef r);
 // Updated on the render thread only when scoring data changed (a few times per second).
 class Timing {
 public:
+  static constexpr int kGapPoints = 200;  // points round the lap where each car's passing time is kept
+
   struct Vehicle {
     double lastLapSeen = -2;   // mLastLapTime when we last looked
     SectorSet last;            // last completed lap
@@ -37,6 +39,26 @@ public:
     double pendingLap = 0;     // official lap time waiting for its trace
     bool pendingValid = false;
     double pendingET = -100;
+
+    // Gaps: when the car last passed each point round the lap, and on which lap.
+    double dist = -1;          // laps completed + fraction of the current one
+    double distET = 0;
+    double crossET[kGapPoints]{};
+    int crossLap[kGapPoints]{}; // lap + 1, 0 = not passed yet
+
+    // Cuts: laps LMU invalidated (they come without a lap time), pit laps not counted.
+    int cuts = 0;
+    bool lastInvalid = false;  // their last lap
+    bool liveInvalid = false;  // lap in progress, when LMU sends the flag for this car
+    uint8_t tlSteps = 0;       // track limit steps (LMU telemetry, may be 0 for remote cars)
+    short lapsSeen = -1;
+    bool lapPitted = false, lapFlagged = false, prevFlagged = false;
+    bool checking = false;     // lap just completed, waiting for its time
+    double checkSince = 0, checkPrev = 0;
+
+    // Pit lane: when / where the car went in and how long it stood still.
+    bool seen = false, prevInPits = false, pitGarage = false;
+    double pitEntryET = -1, pitEntryD = 0, pitStill = 0, prevET = 0;
   };
   struct ClassBest {
     SectorSet best;
@@ -47,6 +69,15 @@ public:
   void Update(const Snapshot& s, int playerIdx);
 
   const Vehicle* Find(long id) const;
+
+  // How far car `behind` is behind car `ahead` on track: seconds at the last point both passed on
+  // the same lap, and whole laps between them. Negative when `behind` is actually in front.
+  // False when not known yet (start of the session, joined mid-lap).
+  bool Gap(long ahead, long behind, double& seconds, int& laps) const;
+
+  // Seconds lost driving through the pit lane without stopping (learned from every car that pits,
+  // saved per track). 0 = not measured yet.
+  double PitLaneLoss() const { return pitLoss_; }
   const ClassBest* Class(const char* vehicleClass) const;
 
   // Player
@@ -95,6 +126,10 @@ private:
   void Reset();
   void OnPlayerLap(const SectorSet& lap, bool valid, bool damaged);
   void PairTrace(Vehicle& vt, const VehicleScoringInfoV01& v, bool isPlayer, bool playerClass, double et);
+  void TrackVehicle(Vehicle& vt, const VehicleScoringInfoV01& v, const Snapshot& s, double et, double L);
+  void AddPitSample(double loss);
+  void LoadPit();
+  void SavePit();
   void LoadRecords(const std::string& track, const std::string& car, const std::string& cls);
   void SaveRecords() const;              // all-time best (+ trace) to BestFile()
   void PutUsage(IniDoc& doc) const;
@@ -138,6 +173,10 @@ private:
 
   TrackMap map_;
   std::string mapTrack_;
+  static constexpr int kPitSamples = 9;
+  double pitSamples_[kPitSamples]{};
+  int pitN_ = 0, pitHead_ = 0;
+  double pitLoss_ = 0, pitSaved_ = 0;
   uint32_t mapSavedVersion_ = 0;
   double mapSaveET_ = -1e9;
 

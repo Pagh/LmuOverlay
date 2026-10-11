@@ -314,12 +314,15 @@ void App::LogSession(double now) {
       loggedLaps_ = m.player->mTotalLaps;
       const RaceInfo& r = m.race;
       Logf("lap %d done: last %.3f best %.3f%s | fuel %.2f L (%.3f L/lap) energy %.1f%% (%.2f%%/lap) | "
-           "laps est %.1f, to go %.1f, in tank %.1f, full %.1f | stop %s, stops left %d, window %d-%d | pace %.3f",
+           "laps est %.1f, to go %.1f, in tank %.1f, full %.1f | stop %s, stops left %d, window %d-%d, "
+           "fill to %.1f L / %.1f%% boxing lap %d | pace %.3f",
            m.player->mTotalLaps, m.player->mLastLapTime, m.player->mBestLapTime,
            liveTiming_.PlayerLastValid() ? "" : " (invalid)", r.fuel, r.fuelPerLap, r.energy * 100.0,
            r.energyPerLap * 100.0, r.totalLaps, r.lapsToGo, r.lapsInTank, r.lapsOnFull,
            !r.stopKnown ? "unknown" : r.stopRequired ? "REQUIRED" : "not needed", r.stopsLeft, r.windowOpen,
-           r.windowClose, r.pace);
+           r.windowClose, r.targetFuel, r.targetEnergy * 100.0, r.targetLap, r.pace);
+      Logf("pit: lane loss %.1f s (0 = not measured), LMU stop estimate %.1f s", liveTiming_.PitLaneLoss(),
+           m.rest && m.rest->valid ? m.rest->pitTotalSeconds : -1.f);
       LogTyres(m);
     }
     if (m.telem) TrackTyreMax(*m.telem);

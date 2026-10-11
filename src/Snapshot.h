@@ -31,6 +31,8 @@ struct Snapshot {
     float virtualEnergy;          // 0..1 (or 0..100), 0 = none
     char tyreF[8], tyreR[8];      // compound names, truncated, not NUL-terminated
     double wear[4];               // 1 = new
+    bool lapInvalid;              // lap in progress invalidated (track limits)
+    uint8_t tlSteps;              // track limit steps (points x scoring mTrackLimitsStepsPerPoint)
   };
   int numModels = 0;
   CarModel models[kMaxVehicles]{};
