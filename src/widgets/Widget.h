@@ -84,7 +84,7 @@ extern PerfStats g_perf;
 // Widget type descriptors, one per widget file.
 extern const WidgetType kRelativeWidget, kStandingsWidget, kDeltaWidget, kSectorsWidget, kFuelWidget, kInputsWidget,
     kTyresWidget, kDamageWidget, kPerfWidget, kTrackInfoWidget, kTrackMapWidget, kRadarWidget, kClassWarnWidget,
-    kStrategyWidget, kAidsWidget, kLapHistoryWidget;
+    kStrategyWidget, kAidsWidget, kLapHistoryWidget, kStartWidget;
 
 // Contextual widgets draw nothing while they have nothing to say; in edit mode (and the
 // settings preview) they show this labelled box instead, so they can still be positioned.

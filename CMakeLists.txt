@@ -54,6 +54,7 @@ add_executable(LmuOverlay WIN32
   src/SharedMemoryReader.cpp
   src/DemoSource.cpp
   src/Model.cpp
+  src/StraightLine.cpp
   src/Overlay.cpp
   src/Painter.cpp
   src/widgets/Registry.cpp
@@ -73,6 +74,7 @@ add_executable(LmuOverlay WIN32
   src/widgets/StrategyWidget.cpp
   src/widgets/AidsWidget.cpp
   src/widgets/LapHistoryWidget.cpp
+  src/widgets/StartWidget.cpp
 )
 
 set_target_properties(LmuOverlay PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")

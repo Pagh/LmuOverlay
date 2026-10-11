@@ -104,6 +104,7 @@ void Model::Update(const Snapshot& s, double nowSeconds) {
     fuel.Reset();
     energy.Reset();
     wear.Reset();
+    straight.Reset();
     lapCount = 0;
     seenClosed_ = 0;
     lapInPits_ = false;
@@ -154,6 +155,28 @@ void Model::UpdateRace() {
   UpdateRaceInfo();
   UpdatePlan();
   UpdateLapHistory();
+  UpdateDamage();
+}
+
+void Model::UpdateDamage() {
+  if (!connected || !player || !telem) return;
+  int dents = telem->mDetached ? 1 : 0;
+  for (unsigned char d : telem->mDentSeverity) dents += d;
+  float aero = 0, susp = 0;
+  if (rest && rest->valid) {
+    aero = rest->aero;
+    for (float x : rest->suspension) susp += x;
+  }
+  if (dents > dentSum_ || aero > aeroSeen_ + 0.005f || susp > suspSeen_ + 0.005f) ++damageSerial;
+  dentSum_ = dents;
+  aeroSeen_ = aero;
+  suspSeen_ = susp;
+  damaged = dents > 0 || aero > 0.001f || susp > 0.001f;
+  straight.Sample(*telem, LiveLapDist(*player), trackLength, player->mInPits, damageSerial, damaged);
+  if (now - straightAt_ >= 0.5 || now < straightAt_) {
+    straightAt_ = now;
+    straightLoss = damaged ? straight.Compare() : StraightLine::Result{};
+  }
 }
 
 // Lap history: the lap's fuel / energy / tyre use is known the moment telemetry's lap counter moves

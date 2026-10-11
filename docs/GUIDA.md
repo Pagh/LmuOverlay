@@ -354,9 +354,27 @@ risultato (es. "about 29 laps, 1 pit stop").
 
 ### Damage (danni)
 
-Compare **solo dopo un contatto**: sagoma dell'auto con le zone colpite, danno aerodinamico e alle
-sospensioni in %, tempo di riparazione e **quanto tempo perdi al giro** rispetto a prima del danno.
-Aero, sospensioni e riparazione richiedono *LMU REST API* acceso (General).
+Compare **solo dopo un contatto**. Ogni tipo di danno ha il suo posto nel disegno e la sua etichetta in
+alto, colorata in base alla gravità (giallo leggero, rosso grave):
+
+- **BODYWORK**: le zone della carrozzeria ammaccate (davanti, lati, dietro);
+- **AERO**: splitter anteriore e alettone posteriore, con la percentuale di danno;
+- **SUSPENSION**: i bracci che collegano ogni ruota all'auto, con la percentuale dell'angolo più colpito;
+- **FLAT** / **WHEEL OFF**: gomma a terra (anello rosso) o ruota persa;
+- **PARTS OFF** (pezzi staccati) e **ENGINE HOT** (surriscaldamento).
+
+Sotto: tempo di riparazione, **quanto perdi al giro** rispetto a prima del danno e **dove**:
+
+- **straights** (rettilinei): il tempo perso in accelerazione e la **velocità di punta persa**. Si misura così:
+  l'overlay registra quanto accelera l'auto a gas pieno a ogni velocità, prima e dopo il danno.
+  Confrontando l'accelerazione **alla stessa velocità**, non conta come sei uscito dalla curva. Poi
+  ripercorre i tratti a gas pieno del tuo ultimo giro pulito, con le stesse velocità d'ingresso, una volta
+  con l'auto sana e una volta con quella danneggiata: la differenza è il tempo perso sui rettilinei.
+  Servono un giro pulito prima del danno e un po' di rettilineo a gas pieno dopo (`measuring`).
+- **corners** (curve): il resto della perdita al giro (meno carico aerodinamico, sospensioni storte).
+
+La scia di altre macchine e il vento disturbano un po' la misura: prendila come una buona stima, non al
+centesimo. Aero, sospensioni e riparazione richiedono *LMU REST API* acceso (General).
 
 Dopo **ogni tocco** (con un'altra macchina o un muro) compare per qualche secondo anche se non ci sono
 danni: `CONTACT · NO DAMAGE` con la forza dell'urto (`hit 240`), così sai subito se il contatto ti ha
@@ -367,6 +385,21 @@ fatto danni. In basso conta i contatti della sessione.
 | Show when there's no damage (spento) | Sempre visibile |
 | Show after a contact (acceso) / Contact shown for (6 s) | Compare dopo un tocco e per quanto |
 | Ignore contacts weaker than (20) | Ignora i colpetti (cordoli, sfioramenti) |
+
+### Race start (partenza)
+
+Compare **solo in gara, prima del verde** (giro di formazione e countdown) e per qualche secondo dopo.
+
+- **FORMATION LAP** / **START COUNTDOWN**: la fase della partenza secondo LMU.
+- La riga grande dice cosa succede dopo, misurato sul **leader**: `COUNTDOWN in 300 m · 6 s`, poi
+  `GREEN in 120 m · 3 s`. I secondi sono calcolati alla velocità attuale del leader.
+- Sotto: la tua velocità, se il limitatore è acceso e quanti metri ti separano dalla macchina che segui.
+
+LMU non dice dove scatta il verde: l'overlay lo **impara** a ogni partenza (dov'era il leader quando è
+partito il countdown e quando è scattato il verde) e lo salva per pista in `records\<pista>.start.ini`.
+La prima volta su una pista mostra solo la distanza del leader dalla linea (`LINE in …`, *learning*).
+Ogni passaggio della procedura finisce nel log (`start: …`): serve a capire quando scatta il limite di
+velocità per chi segue il leader. Per ora l'ipotesi è che coincida con l'inizio del countdown.
 
 ### Lap history (storico giri)
 

@@ -96,7 +96,8 @@ void DemoSource::Fill(Snapshot& s, double t) {
   sc.mMaxLaps = 2147483647;
   sc.mLapDist = kTrackLen;
   sc.mNumVehicles = kCars;
-  sc.mGamePhase = 5;
+  // The first 40 s: formation lap, then the start countdown (to see the race start widget).
+  sc.mGamePhase = t < 1025.0 ? 3 : t < 1040.0 ? 4 : 5;
   sc.mInRealtime = true;
   sc.mAmbientTemp = 24.0;
   sc.mTrackTemp = 33.0;

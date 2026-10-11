@@ -1,8 +1,10 @@
-// Damage: a small car silhouette with the hit zones and wheels, aero / suspension damage,
-// the repair time and the lap time you're losing because of it. Only shown once you're
-// damaged (option), and for a few seconds after any contact, so a touch that left no damage
-// is confirmed too. Body dents, wheel state and impacts come from shared memory; aero /
-// suspension damage and the repair time from LMU's REST API (polled rarely, see App).
+// Damage: a small car drawing where each kind of damage has its own place (body panels, front
+// splitter and rear wing for aero, suspension arms, tyres), labels naming the kinds, aero /
+// suspension amounts, the repair time and what it costs: per lap, split into the straights
+// (from the car's acceleration before / since the damage, see StraightLine) and the corners.
+// Only shown once you're damaged (option), and for a few seconds after any contact, so a touch
+// that left no damage is confirmed too. Body dents, wheel state and impacts come from shared
+// memory; aero / suspension damage and the repair time from LMU's REST API (polled rarely).
 #include "widgets/Widget.h"
 #include <algorithm>
 #include <climits>
@@ -10,17 +12,16 @@
 
 namespace {
 
-constexpr float kW = 360.f, kH = 90.f, kPad = 10.f;
+constexpr float kW = 360.f, kH = 108.f, kPad = 10.f;
 // Car (top view, nose up) in widget coordinates. The outline is designed on a 64 x 108 grid.
-constexpr float kCarX = 14.f, kCarY = 10.f, kCarW = 40.f, kCarH = 70.f;
+constexpr float kCarX = 22.f, kCarY = 12.f, kCarW = 38.f, kCarH = 82.f;
 constexpr float kSX = kCarW / 64.f, kSY = kCarH / 108.f;
-constexpr float kWheelW = 6.f, kWheelH = 15.f;
+constexpr float kWheelW = 7.f, kWheelH = 15.f, kArm = 5.f; // wheels sit kArm px off the body, on two arms
 
 // LMU mDentSeverity index for each zone, row by row:
 // front-left, front, front-right, left, right, rear-left, rear, rear-right.
 constexpr int kZoneIndex[8] = {1, 0, 7, 2, 6, 3, 4, 5};
-const wchar_t* const kZoneName[8] = {L"FRONT-LEFT", L"FRONT", L"FRONT-RIGHT", L"LEFT SIDE", L"RIGHT SIDE",
-                                     L"REAR-LEFT", L"REAR", L"REAR-RIGHT"};
+const wchar_t* const kWheelName[4] = {L"FL", L"FR", L"RL", L"RR"};
 
 enum class Status : uint8_t { Ok, Damaged, Repair, Overheating, Detached };
 
@@ -32,7 +33,11 @@ struct View {
   int aero = 0;              // aero damage, 0.1 %
   int susp[4]{};             // suspension damage, 0.1 %
   int repairS = 0;           // repair time, s
+  bool detached = false;     // body parts came off
   int lossMs = INT_MIN;      // lap time lost per lap
+  int straightMs = INT_MIN;  // of which on the straights
+  int topKph = 0;            // top speed lost, 0.1 km/h
+  uint8_t straightState = 0; // 0 no reference lap, 1 measuring, 2 known
   bool damaged = false;
   bool contact = false;      // a contact in the last few seconds
   int impact = 0;            // its strength (LMU's impact magnitude)
@@ -87,48 +92,69 @@ public:
     p.Panel(kW, kH);
     DrawCar(p);
 
-    const float x = kCarX + kCarW + 18.f, w = kW - x - kPad;
-    // Title: the worst hit zone, or the overall state.
-    wchar_t title[40];
-    D2D1_COLOR_F tc = Col::Good;
-    int worst = -1;
-    for (int z = 0; z < 8; ++z) if (v.zone[z] > 0 && (worst < 0 || v.zone[z] > v.zone[worst])) worst = z;
-    switch (v.status) {
-      case Status::Overheating: wcscpy_s(title, L"OVERHEATING"); tc = heavy_; break;
-      case Status::Detached: wcscpy_s(title, L"PARTS DETACHED"); tc = heavy_; break;
-      default:
-        if (worst >= 0) { swprintf_s(title, L"%ls DAMAGE", kZoneName[worst]); tc = Severity(v.zone[worst]); }
-        else if (v.damaged) { wcscpy_s(title, v.aero > 0 ? L"AERO DAMAGE" : L"DAMAGED"); tc = light_; }
-        else if (v.contact) { wcscpy_s(title, L"CONTACT · NO DAMAGE"); tc = Col::Good; }
-        else wcscpy_s(title, L"NO DAMAGE");
+    const float x = kCarX + kCarW + kArm + kWheelW + 14.f, w = kW - x - kPad;
+    // Line 1: one label per kind of damage, coloured by how bad it is.
+    float cx = x;
+    auto chip = [&](const wchar_t* label, D2D1_COLOR_F c) {
+      const float cw = p.Measure(label, Font::Small) + 10.f;
+      if (cx + cw > x + w - 64.f) return;
+      p.FillRounded(cx, 6, cw, 16, 3, c);
+      p.Text(cx, 6, cw, 16, label, Font::Small, Col::Rgb(0x15181E), Align::Center);
+      cx += cw + 4.f;
+    };
+    int worstZone = 0, worstSusp = 0, suspPm = 0;
+    for (int z = 0; z < 8; ++z) worstZone = std::max<int>(worstZone, v.zone[z]);
+    for (int i = 0; i < 4; ++i) if (v.susp[i] > suspPm) { suspPm = v.susp[i]; worstSusp = i; }
+    if (v.status == Status::Overheating) chip(L"ENGINE HOT", heavy_);
+    if (worstZone > 0) chip(L"BODYWORK", Severity(worstZone));
+    if (v.detached) chip(L"PARTS OFF", heavy_);
+    if (v.aero > 0) chip(L"AERO", ForPermille(v.aero));
+    if (suspPm > 0) chip(L"SUSPENSION", ForPermille(suspPm));
+    for (int i = 0; i < 4; ++i) {
+      if (v.wheelOff[i]) { wchar_t b[16]; swprintf_s(b, L"WHEEL OFF %ls", kWheelName[i]); chip(b, heavy_); }
+      else if (v.flat[i]) { wchar_t b[16]; swprintf_s(b, L"FLAT %ls", kWheelName[i]); chip(b, heavy_); }
     }
-    p.Text(x, 6, w, 18, title, Font::TextBold, tc);
-    if (v.repairS > 0) p.Textf(x, 6, w, 18, Font::Small, Col::Dim, Align::Right, L"repair  %d s", v.repairS);
-    else if (v.contact) p.Textf(x, 6, w, 18, Font::Small, Col::Warn, Align::Right, L"hit %d", v.impact);
+    if (cx == x) {
+      if (v.contact) p.Text(x, 6, w, 16, L"CONTACT · NO DAMAGE", Font::TextBold, Col::Good);
+      else p.Text(x, 6, w, 16, v.damaged ? L"DAMAGED" : L"NO DAMAGE", Font::TextBold, v.damaged ? light_ : Col::Good);
+    }
+    if (v.repairS > 0) p.Textf(x, 6, w, 16, Font::Small, Col::Dim, Align::Right, L"repair %d s", v.repairS);
+    else if (v.contact) p.Textf(x, 6, w, 16, Font::Small, Col::Warn, Align::Right, L"hit %d", v.impact);
 
+    // Lines 2-3: how much aero / suspension (LMU's REST API).
     static const wchar_t* const kCorner[] = {L"Susp FL", L"Susp FR", L"Susp RL", L"Susp RR"};
     if (v.rest) {
-      int ws = 0, wi = 0;
-      for (int i = 0; i < 4; ++i) if (v.susp[i] > ws) { ws = v.susp[i]; wi = i; }
-      Reading(p, x, 26, w, L"Aero", v.aero);
-      Reading(p, x, 44, w, ws > 0 ? kCorner[wi] : L"Suspension", ws);
+      Reading(p, x, 28, w, L"Aero", v.aero);
+      Reading(p, x, 46, w, suspPm > 0 ? kCorner[worstSusp] : L"Suspension", suspPm);
     } else {
-      p.Text(x, 26, w, 34, L"aero / suspension: enable the\nLMU REST API in Settings > General", Font::Small, Col::Dim);
+      p.Text(x, 28, w, 34, L"aero / suspension: enable the\nLMU REST API in Settings > General", Font::Small, Col::Dim);
     }
-    if (v.contacts > 0) p.Textf(x, 64, w, 18, Font::Small, Col::Dim, Align::Left, L"Lap time lost  ·  %d contact%ls",
+
+    // Lines 4-5: what it costs per lap, and where.
+    if (v.contacts > 0) p.Textf(x, 68, w, 18, Font::Small, Col::Dim, Align::Left, L"Lost per lap  ·  %d contact%ls",
                                 v.contacts, v.contacts == 1 ? L"" : L"s");
-    else p.Text(x, 64, w, 18, L"Lap time lost", Font::Small, Col::Dim);
-    if (v.lossMs != INT_MIN) {
-      const D2D1_COLOR_F c = v.lossMs > 300 ? heavy_ : v.lossMs > 50 ? light_ : Col::Text;
-      p.Textf(x, 64, w, 18, Font::TextBold, c, Align::Right, L"%+.2f s / lap", v.lossMs / 1000.0);
+    else p.Text(x, 68, w, 18, L"Lost per lap", Font::Small, Col::Dim);
+    if (v.lossMs != INT_MIN) p.Textf(x, 68, w, 18, Font::TextBold, LossColor(v.lossMs), Align::Right, L"%+.2f s", v.lossMs / 1000.0);
+    else p.Text(x, 68, w, 18, v.damaged ? L"after next clean lap" : L"—", Font::Small, Col::Dim, Align::Right);
+    if (!v.damaged) return;
+    wchar_t buf[96];
+    if (v.straightState == 2) {
+      const int corners = v.lossMs != INT_MIN ? v.lossMs - v.straightMs : INT_MIN;
+      if (corners != INT_MIN)
+        swprintf_s(buf, L"straights %+.2f s (top %+.0f km/h)  ·  corners %+.2f s", v.straightMs / 1000.0, -v.topKph / 10.0,
+                   corners / 1000.0);
+      else swprintf_s(buf, L"straights %+.2f s / lap  ·  top speed %+.0f km/h", v.straightMs / 1000.0, -v.topKph / 10.0);
     } else {
-      p.Text(x, 64, w, 18, v.damaged ? L"after next clean lap" : L"—", Font::Small, Col::Dim, Align::Right);
+      wcscpy_s(buf, v.straightState == 1 ? L"straights: measuring (drive the straights flat out)"
+                                         : L"straights: needs a clean lap before the damage");
     }
+    p.Text(x, 86, w, 16, buf, Font::Small, Col::Dim);
   }
 
 private:
   D2D1_COLOR_F Severity(int s) const { return s >= 2 ? heavy_ : s == 1 ? light_ : ok_; }
   D2D1_COLOR_F ForPermille(int pm) const { return pm >= 250 ? heavy_ : pm > 0 ? light_ : Col::Text; }
+  D2D1_COLOR_F LossColor(int ms) const { return ms > 300 ? heavy_ : ms > 50 ? light_ : Col::Text; }
 
   void Reading(Painter& p, float x, float y, float w, const wchar_t* label, int permille) const {
     p.Text(x, y, 70, 16, label, Font::Small, Col::Dim);
@@ -162,20 +188,28 @@ private:
   void DrawCar(Painter& p) {
     EnsureGeometry(p);
     const View& v = view_;
+    const D2D1_COLOR_F idle = Col::Rgb(0x5A6270);
 
-    // Wheels, coloured by suspension damage; red ring = flat tyre, outline only = wheel lost.
-    const float wx[2] = {kCarX - kWheelW + 1, kCarX + kCarW - 1};
-    const float wy[2] = {kCarY + 18 * kSY, kCarY + kCarH - 20 * kSY - kWheelH};
+    // Suspension: two arms from the body to each wheel, coloured by that corner's damage.
+    // Tyres: grey, red ring = flat, outline only = wheel lost.
+    const float wx[2] = {kCarX - kArm - kWheelW, kCarX + kCarW + kArm};
+    const float wy[2] = {kCarY + 16 * kSY, kCarY + kCarH - 18 * kSY - kWheelH};
     for (int i = 0; i < 4; ++i) {
+      const bool left = i % 2 == 0;
       const float x = wx[i % 2], y = wy[i / 2];
-      const D2D1_COLOR_F c = v.wheelOff[i] ? heavy_ : v.susp[i] > 0 ? ForPermille(v.susp[i]) : Col::Rgb(0x6A7382);
-      if (v.wheelOff[i]) p.Outline(x, y, kWheelW, kWheelH, 2, c, 1.5f);
-      else p.FillRounded(x, y, kWheelW, kWheelH, 2, c);
+      const D2D1_COLOR_F arm = v.susp[i] > 0 ? ForPermille(v.susp[i]) : idle;
+      const float inner = left ? x + kWheelW : x, body = left ? kCarX + 6 * kSX : kCarX + kCarW - 6 * kSX;
+      for (float dy : {4.f, kWheelH - 4.f}) {
+        const D2D1_POINT_2F pts[2] = {{inner, y + dy}, {body, y + kWheelH / 2}};
+        p.Polyline(pts, 2, arm, v.susp[i] > 0 ? 2.f : 1.2f);
+      }
+      if (v.wheelOff[i]) p.Outline(x, y, kWheelW, kWheelH, 2, heavy_, 1.5f);
+      else p.FillRounded(x, y, kWheelW, kWheelH, 2, Col::Rgb(0x9AA3B2));
       if (v.flat[i]) p.Outline(x - 2, y - 2, kWheelW + 4, kWheelH + 4, 3, heavy_, 1.5f);
     }
     if (!body_) return;
 
-    // Body zones, masked by the car's shape.
+    // Body panels (dents), masked by the car's shape.
     p.PushClip(body_.Get());
     const float colX[4] = {kCarX, kCarX + 20 * kSX, kCarX + 44 * kSX, kCarX + kCarW};
     const float rowY[4] = {kCarY - 4, kCarY + 38 * kSY, kCarY + 74 * kSY, kCarY + kCarH};
@@ -188,6 +222,11 @@ private:
     p.PopClip();
     p.FillRounded(kCarX + 23 * kSX, kCarY + 42 * kSY, 18 * kSX, 28 * kSY, 4, Col::Rgb(0x15181E, 0.95f)); // cockpit
     p.DrawGeometry(body_.Get(), Col::Rgb(0xC8CED8, 0.55f), 1.2f);
+
+    // Aero: front splitter and rear wing.
+    const D2D1_COLOR_F aero = v.aero > 0 ? ForPermille(v.aero) : idle;
+    p.FillRounded(kCarX + 10 * kSX, kCarY - 6, 44 * kSX, 3, 1.5f, aero);
+    p.FillRounded(kCarX - 3, kCarY + kCarH + 2, kCarW + 6, 4, 2, aero);
   }
 
   // Counts contacts this session and remembers the last one (LMU only reports the latest impact).
@@ -227,6 +266,7 @@ private:
     }
     int dents = 0;
     for (uint8_t z : v.zone) dents += z;
+    v.detached = t.mDetached;
     v.damaged = dents > 0 || t.mDetached || v.aero > 0 || v.repairS > 0;
     for (int i = 0; i < 4; ++i) v.damaged |= v.flat[i] || v.wheelOff[i] || v.susp[i] > 0;
 
@@ -238,6 +278,15 @@ private:
     // Your average clean lap since the damage minus the average before it.
     if (v.damaged && m.timing && m.timing->PaceBeforeDamage() > 0 && m.timing->PaceSinceDamage() > 0)
       v.lossMs = static_cast<int>(std::lround((m.timing->PaceSinceDamage() - m.timing->PaceBeforeDamage()) * 1000.0));
+    // On the straights: acceleration before / since the damage at the same speeds.
+    if (v.damaged) {
+      const StraightLine::Result& st = m.straightLoss;
+      v.straightState = st.valid ? 2 : m.straight.HasReference() ? 1 : 0;
+      if (st.valid) {
+        v.straightMs = Quantize(st.timeLoss, 0.01) * 10; // 0.01 s steps: the measurement isn't finer
+        v.topKph = Quantize(st.topSpeedLoss, 1.0) * 10;
+      }
+    }
   }
 
   bool showClean_, showContact_;
@@ -253,5 +302,7 @@ private:
 } // namespace
 
 const WidgetType kDamageWidget{
-  "damage", "Damage", "Body zones, aero and suspension damage, repair time, the lap time you're losing, and contacts.",
+  "damage", "Damage",
+  "Kinds of damage (bodywork, aero, suspension, tyres), how much, repair time, the lap time you're losing "
+  "(straights / corners), and contacts.",
   true, 1544, 750, 250, kOptions, CreateWidget<DamageWidget>};

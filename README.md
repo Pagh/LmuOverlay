@@ -111,7 +111,8 @@ monitor's top-left corner and are always clamped onto it, so a widget can't be l
 | aids | TC and ABS activity: the label lights up while the aid works (`mTCActive` / `mABSActive`), a strip shows when it worked over the last 5 s; optional count per lap |
 | tyres | Inner-layer (or surface / carcass) temperature with L/C/R strip, coloured against the compound's optimal temperature, pressure, tread left, brake temperature; optional READY TO PUSH badge |
 | strategy | Races: pit stop required → fuel / energy, laps to the end, pit window, the level to set in LMU's pit menu (it's the level you leave with, not an amount to add; for boxing at the end of this lap), stop time; otherwise a one-line fuel check. Practice / qualifying: plan for the race set in Settings > General > Race plan (time or laps) |
-| damage | After a hit: car silhouette with the hit zones, aero and suspension damage %, repair time, lap time lost; for a few seconds after any contact ("CONTACT · NO DAMAGE"), with the session's contact count |
+| damage | After a hit: labels per kind of damage (bodywork, aero, suspension, flat / wheel off, parts off, overheating) and a car drawing with body panels, splitter / wing and suspension arms coloured by damage; aero and suspension %, repair time, lap time lost split into straights (time + top speed, from full-throttle acceleration vs speed before / since the damage, replayed over your last clean lap's flat-out stretches) and corners; for a few seconds after any contact ("CONTACT · NO DAMAGE"), with the session's contact count |
+| start | Races, before the green: formation / countdown, how far (m, s) the leader is from where LMU started the countdown and went green last time here (learned at each start, `records\<track>.start.ini`), your speed, limiter, distance to the car you follow |
 | laps | Lap history: your last laps with time (invalid struck through), gap to your session best, fuel / energy / tyre tread used; top row = lap in progress, fuel / energy used so far minus your last clean lap's at the same point |
 | fuel | Detailed fuel / energy table (off by default; Strategy covers it) |
 | perf | The overlay's own cost (off by default) |
@@ -164,6 +165,7 @@ src/
   Overlay.*                overlay window, D3D11 / Direct2D / DirectComposition, edit mode
   Painter.*                drawing helpers, fonts, colours
   Timing.*                 sector / lap bookkeeping for the field, all-time records, fuel use, pace before/after damage
+  StraightLine.*           full-throttle acceleration vs speed before / since damage -> time and top speed lost on straights
   TrackMap.*               track outline + sector boundaries learned from car positions
   LmuRest.*, Json.*        background client for LMU's REST API (damage details)
   widgets/                 one file per widget (options + drawing); Registry.cpp lists them

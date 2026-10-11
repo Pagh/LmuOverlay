@@ -1,6 +1,7 @@
 #pragma once
 #include "LmuRest.h"
 #include "Snapshot.h"
+#include "StraightLine.h"
 #include "Timing.h"
 #include <cstdint>
 
@@ -153,6 +154,12 @@ struct Model {
   wchar_t notice[48] = L"";                      // short confirmation (profile / reference switched)
   double noticeAt = -100;                        // NowSeconds() when it was set
 
+  // Damage now (body dents, detached parts, aero / suspension from REST) and what it costs on the straights.
+  bool damaged = false;
+  int damageSerial = 0;                          // +1 each time new damage appears
+  StraightLine straight;
+  StraightLine::Result straightLoss;             // refreshed twice a second
+
   RaceInfo race;                                 // see UpdateRace()
   RacePlanSettings planCfg;                      // set by the app from settings.ini
   RacePlan plan;                                 // filled by UpdateRace() outside races
@@ -171,6 +178,7 @@ private:
   void UpdateRaceInfo();
   void UpdatePlan();
   void UpdateLapHistory();
+  void UpdateDamage();
 
   long lastSession_ = -1;
   char lastTrack_[64] = "";
@@ -183,4 +191,7 @@ private:
   double closedAt_ = -100, timeAt_ = -100;
   bool lapInPits_ = false;
   LapRecord closedLap_, timedLap_;
+  int dentSum_ = 0;
+  float aeroSeen_ = 0, suspSeen_ = 0;
+  double straightAt_ = -100;
 };

@@ -78,6 +78,15 @@ public:
   // Seconds lost driving through the pit lane without stopping (learned from every car that pits,
   // saved per track). 0 = not measured yet.
   double PitLaneLoss() const { return pitLoss_; }
+
+  // Rolling start, learned at each race start and saved per track: where the overall leader was
+  // (metres before the start line, negative = past it) when LMU started the countdown (phase 4)
+  // and when it went green (phase 5), and how long the countdown lasted.
+  struct StartPoints {
+    bool hasCountdown = false, hasGreen = false;
+    double countdownBefore = 0, greenBefore = 0, countdownS = 0;
+  };
+  const StartPoints& Start() const { return start_; }
   const ClassBest* Class(const char* vehicleClass) const;
 
   // Player
@@ -130,6 +139,9 @@ private:
   void AddPitSample(double loss);
   void LoadPit();
   void SavePit();
+  void TrackStart(const Snapshot& s, int playerIdx);
+  void LoadStart();
+  void SaveStart() const;
   void LoadRecords(const std::string& track, const std::string& car, const std::string& cls);
   void SaveRecords() const;              // all-time best (+ trace) to BestFile()
   void PutUsage(IniDoc& doc) const;
@@ -177,6 +189,9 @@ private:
   double pitSamples_[kPitSamples]{};
   int pitN_ = 0, pitHead_ = 0;
   double pitLoss_ = 0, pitSaved_ = 0;
+  StartPoints start_;
+  int startPhase_ = -1, startLight_ = -1, startMyPhase_ = -1;
+  double countdownET_ = -1;
   uint32_t mapSavedVersion_ = 0;
   double mapSaveET_ = -1e9;
 

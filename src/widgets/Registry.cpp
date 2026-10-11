@@ -8,7 +8,8 @@ namespace {
 const WidgetType* const kAll[] = {&kStandingsWidget, &kDeltaWidget,  &kTrackInfoWidget, &kSectorsWidget,
                                   &kTrackMapWidget,  &kRelativeWidget, &kClassWarnWidget, &kRadarWidget,
                                   &kInputsWidget,    &kAidsWidget,    &kTyresWidget,     &kStrategyWidget,
-                                  &kDamageWidget,    &kLapHistoryWidget, &kFuelWidget,  &kPerfWidget};
+                                  &kDamageWidget,    &kLapHistoryWidget, &kFuelWidget,  &kPerfWidget,
+                                  &kStartWidget};
 }
 
 std::span<const WidgetType> WidgetTypes() {

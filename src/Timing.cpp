@@ -303,6 +303,73 @@ void Timing::SavePit() {
   pitSaved_ = pitLoss_;
 }
 
+// Race start: log every change LMU reports before the green (to learn how the procedure works) and
+// remember where the leader was when the countdown began and when it went green.
+void Timing::TrackStart(const Snapshot& s, int playerIdx) {
+  const ScoringInfoV01& sc = s.scoring;
+  const int phase = sc.mGamePhase;
+  const bool race = sc.mSession >= 10 && sc.mSession <= 13;
+  const double L = sc.mLapDist;
+  if (!race || L <= 100 || playerIdx < 0) { startPhase_ = phase; return; }
+  const VehicleScoringInfoV01& me = s.vehicles[playerIdx];
+  const VehicleScoringInfoV01* leader = &me;
+  for (int i = 0; i < s.numVehicles; ++i)
+    if (s.vehicles[i].mPlace == 1) leader = &s.vehicles[i];
+  auto before = [L](double d) { const double b = L - d; return b > L * 0.5 ? b - L : b; }; // metres to the line
+  auto kph = [](const VehicleScoringInfoV01& v) { return std::hypot(v.mLocalVel.x, v.mLocalVel.z) * 3.6; };
+  const int light = sc.mStartLight, myPhase = me.mIndividualPhase;
+  if (phase == startPhase_ && (phase >= 5 || (light == startLight_ && myPhase == startMyPhase_))) return;
+
+  const bool limiter = s.hasPlayerTelem && s.telem.mSpeedLimiterActive;
+  Logf("start: phase %d -> %d, lights %d/%d, your phase %d, ET %.1f | leader %s %.0f m before the line at %.0f km/h | "
+       "you P%d %.0f m at %.0f km/h, limiter %d, yellow state %d",
+       startPhase_, phase, light, sc.mNumRedLights, myPhase, sc.mCurrentET,
+       FixedString(leader->mDriverName, sizeof(leader->mDriverName)).c_str(), before(leader->mLapDist), kph(*leader),
+       me.mPlace, before(me.mLapDist), kph(me), limiter ? 1 : 0, sc.mYellowFlagState);
+  if (startPhase_ == 3 && phase == 4) {
+    start_.hasCountdown = true;
+    start_.countdownBefore = before(leader->mLapDist);
+    countdownET_ = sc.mCurrentET;
+    SaveStart();
+  } else if (startPhase_ >= 3 && startPhase_ <= 4 && phase == 5) {
+    start_.hasGreen = true;
+    start_.greenBefore = before(leader->mLapDist);
+    if (startPhase_ == 4 && countdownET_ > 0) start_.countdownS = sc.mCurrentET - countdownET_;
+    SaveStart();
+  }
+  startPhase_ = phase;
+  startLight_ = light;
+  startMyPhase_ = myPhase;
+}
+
+void Timing::LoadStart() {
+  start_ = StartPoints{};
+  countdownET_ = -1;
+  if (recordsDir_.empty() || mapTrack_.empty()) return;
+  IniDoc doc;
+  if (!doc.Load(recordsDir_ + L"\\" + SafeFileName(mapTrack_) + L".start.ini")) return;
+  start_.hasCountdown = doc.Get("start", "countdown_before", "") != "";
+  start_.countdownBefore = doc.GetFloat("start", "countdown_before", 0);
+  start_.hasGreen = doc.Get("start", "green_before", "") != "";
+  start_.greenBefore = doc.GetFloat("start", "green_before", 0);
+  start_.countdownS = doc.GetFloat("start", "countdown_s", 0);
+}
+
+void Timing::SaveStart() const {
+  if (recordsDir_.empty() || mapTrack_.empty()) return;
+  CreateDirectoryW(recordsDir_.c_str(), nullptr);
+  IniDoc doc;
+  doc.header = "Rolling start, learned at the last race start here: metres before the start line where the overall "
+               "leader was when the countdown began (LMU phase 4) and when it went green.";
+  doc.Set("info", "track", mapTrack_);
+  char buf[32];
+  auto put = [&](const char* key, double v) { snprintf(buf, sizeof(buf), "%.1f", v); doc.Set("start", key, buf); };
+  if (start_.hasCountdown) put("countdown_before", start_.countdownBefore);
+  if (start_.hasGreen) put("green_before", start_.greenBefore);
+  if (start_.countdownS > 0) put("countdown_s", start_.countdownS);
+  doc.Save(recordsDir_ + L"\\" + SafeFileName(mapTrack_) + L".start.ini");
+}
+
 bool Timing::Gap(long aheadId, long behindId, double& seconds, int& laps) const {
   const Vehicle* a = Find(aheadId);
   const Vehicle* b = Find(behindId);
@@ -424,6 +491,8 @@ void Timing::Update(const Snapshot& s, int playerIdx) {
   }
   if (map_.Complete() && map_.Version() != mapSavedVersion_ && et - mapSaveET_ > 30.0) SaveMap();
   if (et < mapSaveET_) mapSaveET_ = -1e9;
+
+  TrackStart(s, playerIdx);
 
   const char* myClass = playerIdx >= 0 ? s.vehicles[playerIdx].mVehicleClass : nullptr;
   bool anyLap = false;
@@ -684,6 +753,7 @@ void Timing::RecordConsumption(double fuelPerLap, double energyPerLap) {
 void Timing::LoadMap(const std::string& track, double length) {
   mapTrack_ = track;
   LoadPit();
+  LoadStart();
   map_.Reset(length);
   mapSavedVersion_ = map_.Version();
   if (recordsDir_.empty()) return;
